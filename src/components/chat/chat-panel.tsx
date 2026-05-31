@@ -497,12 +497,13 @@ export function ChatPanel() {
           if (detectEditIntent(text)) {
             const lastSys = systemMessages[systemMessages.length - 1]
             if (lastSys && typeof lastSys.content === "string") {
-              // 注入文件列表让 AI 知道有哪些文件可以操作
-              const { listScopeFiles } = await import("@/lib/novel/agent-tools")
-              const files = await listScopeFiles(pp, "chapters")
-              const fileListStr = files.map(f => `- ${f.name}`).join("\n")
+              const { readScopeFileContents } = await import("@/lib/novel/agent-tools")
+              const filesWithContent = await readScopeFileContents(pp, "chapters")
+              const fileContentStr = filesWithContent.length > 0
+                ? `\n\n## 当前章节文件内容（供修改定位）\n${filesWithContent.map(f => `### ${f.name}\n\`\`\`\n${f.content}\n\`\`\``).join("\n\n")}`
+                : "\n\n## 当前章节文件列表\n(暂无章节文件)"
               lastSys.content += buildAgentSystemSuffix("chapters")
-              lastSys.content += `\n\n## 当前章节文件列表\n${fileListStr || "(暂无章节文件)"}`
+              lastSys.content += fileContentStr
             }
           }
         }

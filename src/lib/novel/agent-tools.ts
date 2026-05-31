@@ -46,8 +46,8 @@ export async function listScopeFiles(
 export async function readScopeFileContents(
   projectPath: string,
   scope: "chapters" | "outlines",
-  maxFiles = 10,
-  maxCharsPerFile = 4000,
+  maxFiles = 15,
+  maxCharsPerFile = 8000,
 ): Promise<{ name: string; path: string; content: string }[]> {
   const files = await listScopeFiles(projectPath, scope)
   const results: { name: string; path: string; content: string }[] = []
@@ -104,7 +104,8 @@ export async function applyFileEdit(
       }
     }
 
-    const newContent = originalContent.replace(edit.search, edit.replace)
+    // 替换所有匹配项（如果有多处相同内容）
+    const newContent = originalContent.split(edit.search).join(edit.replace)
     await writeFile(normalizedPath, newContent)
 
     return {

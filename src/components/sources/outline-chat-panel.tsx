@@ -221,10 +221,16 @@ export function OutlineChatPanel({ onClose }: { onClose: () => void }) {
 
       // Agent mode: detect edit intent and add file edit instructions
       const { detectEditIntent, buildAgentSystemSuffix } = await import("@/lib/novel/agent-parser")
-      const agentSuffix = detectEditIntent(input.trim()) ? buildAgentSystemSuffix("outlines") : ""
-      const { listScopeFiles } = await import("@/lib/novel/agent-tools")
-      const files = detectEditIntent(input.trim()) ? await listScopeFiles(project.path, "outlines") : []
-      const fileListStr = files.length > 0 ? `\n\n## 当前大纲文件列表\n${files.map(f => `- ${f.name}`).join("\n")}` : ""
+      const hasEditIntent = detectEditIntent(input.trim())
+      const agentSuffix = hasEditIntent ? buildAgentSystemSuffix("outlines") : ""
+      let fileListStr = ""
+      if (hasEditIntent) {
+        const { readScopeFileContents } = await import("@/lib/novel/agent-tools")
+        const filesWithContent = await readScopeFileContents(project.path, "outlines")
+        fileListStr = filesWithContent.length > 0
+          ? `\n\n## 当前大纲文件内容（供修改定位）\n${filesWithContent.map(f => `### ${f.name}\n\`\`\`\n${f.content}\n\`\`\``).join("\n\n")}`
+          : "\n\n## 当前大纲文件列表\n(暂无大纲文件)"
+      }
 
       const systemPrompt = `你是一个专业的小说大纲编辑助手。以下是当前小说的大纲和章节内容，请根据用户的问题进行大纲相关的讨论和创作。\n\n${context}${agentSuffix}${fileListStr}`
 

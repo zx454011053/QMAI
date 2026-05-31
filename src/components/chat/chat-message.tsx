@@ -5,19 +5,17 @@ import remarkMath from "remark-math"
 import rehypeKatex from "rehype-katex"
 import "katex/dist/katex.min.css"
 import {
-  Bot, User, FileText, BookmarkPlus, ChevronDown, ChevronRight, RefreshCw, Copy, Check,
+  Bot, User, FileText, ChevronDown, ChevronRight, RefreshCw, Copy, Check,
   Users, Lightbulb, BookOpen, HelpCircle, GitMerge, BarChart3, Layout, Globe,
   Image as ImageIcon,
 } from "lucide-react"
 import { useWikiStore } from "@/stores/wiki-store"
-import { readFile, writeFile, listDirectory } from "@/commands/fs"
+import { readFile } from "@/commands/fs"
 import { getLastQueryPages } from "@/components/chat/chat-shared"
 import type { DisplayMessage } from "@/stores/chat-store"
 
 import { convertLatexToUnicode } from "@/lib/latex-to-unicode"
 import { normalizePath, getFileName } from "@/lib/path-utils"
-import { makeQueryFileName } from "@/lib/wiki-filename"
-import { hasUsableLlm } from "@/lib/has-usable-llm"
 import { resolveMarkdownImageSrc } from "@/lib/markdown-image-resolver"
 import { findRawSourceForImage, imageUrlToAbsolute } from "@/lib/raw-source-resolver"
 import { detectLanguage } from "@/lib/detect-language"
@@ -94,7 +92,6 @@ export function ChatMessage({ message, isLastAssistant, onRegenerate, novelMode,
             {(hovered || (novelMode && isLastAssistant)) && (
               <CopyButton content={message.content} />
             )}
-            <SaveToWikiButton content={message.content} visible={!!(hovered || (novelMode && isLastAssistant))} />
             {isLastAssistant && onRegenerate && (
               <button
                 type="button"
@@ -140,118 +137,6 @@ function CopyButton({ content }: { content: string }) {
     >
       {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
       {copied ? "已复制" : "复制"}
-    </button>
-  )
-}
-
-function SaveToWikiButton({ content, visible }: { content: string; visible: boolean }) {
-  const project = useWikiStore((s) => s.project)
-  const setFileTree = useWikiStore((s) => s.setFileTree)
-  const [saved, setSaved] = useState(false)
-  const [saving, setSaving] = useState(false)
-
-  const handleSave = useCallback(async () => {
-    if (!project || saving) return
-    const pp = normalizePath(project.path)
-    setSaving(true)
-    try {
-      // Generate a unique filename for this save.
-      // See `src/lib/wiki-filename.ts` — the slug is Unicode-aware
-      // (so CJK titles don't collapse to empty) and the HHMMSS
-      // timestamp suffix guarantees same-day saves stay distinct.
-      const firstLine = content.split("\n")[0].replace(/^#+\s*/, "").trim()
-      const title = firstLine.slice(0, 60) || "保存的问答"
-      const { date, fileName } = makeQueryFileName(title)
-      const filePath = `${pp}/wiki/queries/${fileName}`
-
-      // Strip hidden sources comment and thinking blocks from content
-      const cleanContent = content
-        .replace(/<!--\s*sources:.*?-->/g, "")
-        .replace(/<think(?:ing)?>\s*[\s\S]*?<\/think(?:ing)?>\s*/gi, "")
-        .replace(/<think(?:ing)?>\s*[\s\S]*$/gi, "")
-        .trimEnd()
-
-      const frontmatter = [
-        "---",
-        `type: query`,
-        `title: "${title.replace(/"/g, '\\"')}"`,
-        `created: ${date}`,
-        `tags: []`,
-        "---",
-        "",
-      ].join("\n")
-
-      await writeFile(filePath, frontmatter + cleanContent)
-
-      // Update index.md — append under ## Queries section
-      const indexPath = `${pp}/wiki/index.md`
-      let indexContent = ""
-      try {
-        indexContent = await readFile(indexPath)
-      } catch {
-        indexContent = "# 章节库索引\n\n## 问答记录\n"
-      }
-      // The wikilink target is the filename WITHOUT the `.md`
-      // extension — must match `fileName` exactly (including the
-      // time suffix) or the link lands on a 404.
-      const linkTarget = fileName.replace(/\.md$/, "")
-      const entry = `- [[queries/${linkTarget}|${title}]]`
-      if (indexContent.includes("## 问答记录")) {
-        indexContent = indexContent.replace(
-          /(## 问答记录\n)/,
-          `$1${entry}\n`
-        )
-      } else {
-        indexContent = indexContent.trimEnd() + "\n\n## 问答记录\n" + entry + "\n"
-      }
-      await writeFile(indexPath, indexContent)
-
-      // Append to log.md
-      const logPath = `${pp}/wiki/log.md`
-      let logContent = ""
-      try {
-        logContent = await readFile(logPath)
-      } catch {
-        logContent = "# 操作记录\n\n"
-      }
-      const logEntry = `- ${date}: 保存问答页面 \`${fileName}\`\n`
-      await writeFile(logPath, logContent.trimEnd() + "\n" + logEntry)
-
-      // Refresh file tree and update graph
-      const tree = await listDirectory(pp)
-      setFileTree(tree)
-      useWikiStore.getState().bumpDataVersion()
-
-      setSaved(true)
-      setTimeout(() => setSaved(false), 2000)
-
-      // Full auto-ingest: extract entities, concepts, cross-references from saved content
-      const llmConfig = useWikiStore.getState().llmConfig
-      if (hasUsableLlm(llmConfig)) {
-        const { autoIngest } = await import("@/lib/ingest")
-        autoIngest(pp, filePath, llmConfig).catch((err) =>
-          console.error("自动摄取查询失败:", err)
-        )
-      }
-    } catch (err) {
-      console.error("Failed to save to wiki:", err)
-    } finally {
-      setSaving(false)
-    }
-  }, [project, content, saving, setFileTree])
-
-  if (!visible && !saved) return null
-
-  return (
-    <button
-      type="button"
-      onClick={handleSave}
-      disabled={saving}
-      className="self-start inline-flex items-center gap-1 rounded px-2 py-0.5 text-[11px] text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
-      title="保存到章节库"
-    >
-      <BookmarkPlus className="h-3 w-3" />
-      {saved ? "已保存" : saving ? "保存中..." : "保存到章节库"}
     </button>
   )
 }

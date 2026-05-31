@@ -1,23 +1,19 @@
-import { useState, useRef, useCallback, useEffect } from "react"
-import { Send, X, Save, Copy, RefreshCw, FileText } from "lucide-react"
+import { useRef, useCallback, useEffect } from "react"
+import { Send, X, Save, Copy, RefreshCw, FileText, Square, Plus, Trash2 } from "lucide-react"
 import { useWikiStore } from "@/stores/wiki-store"
+import { useOutlineChatStore, type OutlineChatMessage } from "@/stores/outline-chat-store"
 import { normalizePath } from "@/lib/path-utils"
 import { readFile, writeFile, listDirectory, createDirectory, fileExists } from "@/commands/fs"
 import { streamChat, type ChatMessage } from "@/lib/llm-client"
 import { hasUsableLlm } from "@/lib/has-usable-llm"
 import ReactMarkdown from "react-markdown"
-
-interface OutlineChatMessage {
-  role: "user" | "assistant"
-  content: string
-}
+import { useState } from "react"
 
 async function loadOutlineContext(projectPath: string): Promise<{ context: string; sources: string[] }> {
   const pp = normalizePath(projectPath)
   const sections: string[] = []
   const sources: string[] = []
 
-  // 读取大纲目录内容
   try {
     const outlinesDir = `${pp}/wiki/outlines`
     const tree = await listDirectory(outlinesDir)
@@ -33,7 +29,6 @@ async function loadOutlineContext(projectPath: string): Promise<{ context: strin
     }
   } catch { /* no outlines dir */ }
 
-  // 读取最近章节摘要
   try {
     const chaptersDir = `${pp}/wiki/chapters`
     const tree = await listDirectory(chaptersDir)
@@ -52,7 +47,6 @@ async function loadOutlineContext(projectPath: string): Promise<{ context: strin
 }
 
 async function generateOutlineTitle(content: string): Promise<string> {
-  // 从内容的前几行提取标题
   const lines = content.split("\n").filter(l => l.trim())
   for (const line of lines.slice(0, 5)) {
     const headingMatch = line.match(/^#+\s+(.+)/)
@@ -78,24 +72,36 @@ async function getUniqueOutlinePath(outlinesDir: string, title: string): Promise
 export function OutlineChatPanel({ onClose }: { onClose: () => void }) {
   const project = useWikiStore((s) => s.project)
   const llmConfig = useWikiStore((s) => s.llmConfig)
-  const [messages, setMessages] = useState<OutlineChatMessage[]>([])
+
+  const conversations = useOutlineChatStore((s) => s.conversations)
+  const activeConversationId = useOutlineChatStore((s) => s.activeConversationId)
+  const streamingContent = useOutlineChatStore((s) => s.streamingContent)
+  const isStreaming = useOutlineChatStore((s) => s.isStreaming)
+  const createConversation = useOutlineChatStore((s) => s.createConversation)
+  const setActiveConversation = useOutlineChatStore((s) => s.setActiveConversation)
+  const addMessage = useOutlineChatStore((s) => s.addMessage)
+  const replaceLastAssistant = useOutlineChatStore((s) => s.replaceLastAssistant)
+  const removeLastMessage = useOutlineChatStore((s) => s.removeLastMessage)
+  const deleteConversation = useOutlineChatStore((s) => s.deleteConversation)
+  const setStreamingContent = useOutlineChatStore((s) => s.setStreamingContent)
+  const setIsStreaming = useOutlineChatStore((s) => s.setIsStreaming)
+
+  const activeConv = conversations.find((c) => c.id === activeConversationId)
+  const activeMessages = activeConv?.messages ?? []
+
   const [input, setInput] = useState("")
-  const [streaming, setStreaming] = useState(false)
-  const [streamContent, setStreamContent] = useState("")
   const [saveStatus, setSaveStatus] = useState("")
-  const [lastSources, setLastSources] = useState<string[]>([])
-  const [copied, setCopied] = useState<number | null>(null)
+  const [copied, setCopied] = useState<string | null>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
   const userScrolledUpRef = useRef(false)
   const abortRef = useRef<AbortController | null>(null)
-  const lastUserInputRef = useRef("")
 
-  // Auto-scroll with user override
+  // Auto-scroll
   useEffect(() => {
     const container = scrollRef.current
     if (!container || userScrolledUpRef.current) return
     container.scrollTop = container.scrollHeight
-  }, [messages, streamContent])
+  }, [activeMessages, streamingContent])
 
   useEffect(() => {
     const container = scrollRef.current
@@ -109,70 +115,91 @@ export function OutlineChatPanel({ onClose }: { onClose: () => void }) {
   }, [])
 
   const handleSend = useCallback(async () => {
-    if (!input.trim() || !project || streaming) return
+    if (!input.trim() || !project || isStreaming) return
     if (!hasUsableLlm(llmConfig)) return
 
-    const userMsg: OutlineChatMessage = { role: "user", content: input.trim() }
-    const updatedMessages = [...messages, userMsg]
-    setMessages(updatedMessages)
-    lastUserInputRef.current = input.trim()
+    let convId = activeConversationId
+    if (!convId) {
+      convId = createConversation()
+    }
+
+    const userMsg: OutlineChatMessage = { id: crypto.randomUUID(), role: "user", content: input.trim() }
+    addMessage(convId, userMsg)
     setInput("")
-    setStreaming(true)
-    setStreamContent("")
+    setIsStreaming(true)
+    setStreamingContent("")
     userScrolledUpRef.current = false
 
     try {
       const { context, sources } = await loadOutlineContext(project.path)
-      setLastSources(sources)
-      const systemPrompt = `你是一个专业的小说大纲编辑助手。以下是当前小说的大纲和章节内容，请根据用户的问题进行大纲相关的讨论和创作。
-
-${context}`
+      const allMsgs = [...(useOutlineChatStore.getState().conversations.find(c => c.id === convId)?.messages ?? [])]
+      const systemPrompt = `你是一个专业的小说大纲编辑助手。以下是当前小说的大纲和章节内容，请根据用户的问题进行大纲相关的讨论和创作。\n\n${context}`
 
       const chatMessages: ChatMessage[] = [
         { role: "system", content: systemPrompt },
-        ...updatedMessages.map(m => ({ role: m.role as "user" | "assistant", content: m.content })),
+        ...allMsgs.map(m => ({ role: m.role as "user" | "assistant", content: m.content })),
       ]
 
       let result = ""
       const controller = new AbortController()
       abortRef.current = controller
 
+      // Add placeholder assistant message
+      addMessage(convId, { id: crypto.randomUUID(), role: "assistant", content: "", sources })
+
       await streamChat(llmConfig, chatMessages, {
         onToken: (token) => {
           result += token
-          setStreamContent(result)
+          setStreamingContent(result)
         },
         onDone: () => {},
         onError: () => {},
       }, controller.signal)
 
-      setMessages([...updatedMessages, { role: "assistant", content: result }])
-      setStreamContent("")
+      replaceLastAssistant(convId, result, sources)
+      setStreamingContent("")
     } catch {
-      // ignore abort
+      // If aborted, keep partial content
+      const partial = useOutlineChatStore.getState().streamingContent
+      if (partial) {
+        replaceLastAssistant(convId!, partial)
+      } else {
+        removeLastMessage(convId!)
+      }
+      setStreamingContent("")
     } finally {
-      setStreaming(false)
+      setIsStreaming(false)
       abortRef.current = null
     }
-  }, [input, project, streaming, llmConfig, messages])
+  }, [input, project, isStreaming, llmConfig, activeConversationId, createConversation, addMessage, replaceLastAssistant, removeLastMessage, setIsStreaming, setStreamingContent])
+
+  const handleStop = useCallback(() => {
+    abortRef.current?.abort()
+  }, [])
 
   const handleRegenerate = useCallback(async (msgIndex: number) => {
-    if (!project || streaming) return
+    if (!project || isStreaming || !activeConversationId) return
     if (!hasUsableLlm(llmConfig)) return
 
-    // Remove the last assistant message and resend
-    const targetMessages = messages.slice(0, msgIndex)
-    setMessages(targetMessages)
-    setStreaming(true)
-    setStreamContent("")
+    // Remove messages from msgIndex onwards
+    const conv = useOutlineChatStore.getState().conversations.find(c => c.id === activeConversationId)
+    if (!conv) return
+    const targetMessages = conv.messages.slice(0, msgIndex)
+
+    // Update store
+    useOutlineChatStore.setState((s) => ({
+      conversations: s.conversations.map(c =>
+        c.id === activeConversationId ? { ...c, messages: targetMessages } : c
+      ),
+    }))
+
+    setIsStreaming(true)
+    setStreamingContent("")
     userScrolledUpRef.current = false
 
     try {
       const { context, sources } = await loadOutlineContext(project.path)
-      setLastSources(sources)
-      const systemPrompt = `你是一个专业的小说大纲编辑助手。以下是当前小说的大纲和章节内容，请根据用户的问题进行大纲相关的讨论和创作。
-
-${context}`
+      const systemPrompt = `你是一个专业的小说大纲编辑助手。以下是当前小说的大纲和章节内容，请根据用户的问题进行大纲相关的讨论和创作。\n\n${context}`
 
       const chatMessages: ChatMessage[] = [
         { role: "system", content: systemPrompt },
@@ -183,28 +210,32 @@ ${context}`
       const controller = new AbortController()
       abortRef.current = controller
 
+      addMessage(activeConversationId, { id: crypto.randomUUID(), role: "assistant", content: "", sources })
+
       await streamChat(llmConfig, chatMessages, {
         onToken: (token) => {
           result += token
-          setStreamContent(result)
+          setStreamingContent(result)
         },
         onDone: () => {},
         onError: () => {},
       }, controller.signal)
 
-      setMessages([...targetMessages, { role: "assistant", content: result }])
-      setStreamContent("")
+      replaceLastAssistant(activeConversationId, result, sources)
+      setStreamingContent("")
     } catch {
-      // ignore
+      const partial = useOutlineChatStore.getState().streamingContent
+      if (partial) replaceLastAssistant(activeConversationId, partial)
+      setStreamingContent("")
     } finally {
-      setStreaming(false)
+      setIsStreaming(false)
       abortRef.current = null
     }
-  }, [project, streaming, llmConfig, messages])
+  }, [project, isStreaming, llmConfig, activeConversationId, addMessage, replaceLastAssistant, setIsStreaming, setStreamingContent])
 
-  const handleCopy = useCallback((content: string, index: number) => {
+  const handleCopy = useCallback((content: string, id: string) => {
     navigator.clipboard.writeText(content).then(() => {
-      setCopied(index)
+      setCopied(id)
       setTimeout(() => setCopied(null), 2000)
     }).catch(() => {})
   }, [])
@@ -224,18 +255,39 @@ ${context}`
       const tree = await listDirectory(pp)
       useWikiStore.getState().setFileTree(tree)
       useWikiStore.getState().bumpDataVersion()
-      setSaveStatus(`已保存为大纲：${fileName}`)
+      setSaveStatus(`已保存：${fileName}`)
     } catch (err) {
       setSaveStatus(`保存失败：${err instanceof Error ? err.message : String(err)}`)
     }
   }, [project])
 
   return (
-    <div className="flex h-[350px] flex-col border-t border-border bg-background">
-      {/* Header */}
-      <div className="flex items-center justify-between border-b px-3 py-2">
-        <span className="text-xs font-medium">AI 大纲助手</span>
-        <div className="flex items-center gap-2">
+    <div className="flex h-[380px] flex-col border-t border-border bg-background">
+      {/* Header with conversation tabs */}
+      <div className="flex items-center gap-1 border-b px-2 py-1.5 overflow-x-auto">
+        <button
+          onClick={() => { createConversation() }}
+          className="shrink-0 rounded px-2 py-1 text-xs text-muted-foreground hover:bg-accent"
+          title="新建大纲对话"
+        >
+          <Plus className="h-3.5 w-3.5" />
+        </button>
+        {conversations.map((conv) => (
+          <button
+            key={conv.id}
+            onClick={() => setActiveConversation(conv.id)}
+            className={`group shrink-0 flex items-center gap-1 rounded px-2 py-1 text-xs ${
+              conv.id === activeConversationId ? "bg-accent text-foreground" : "text-muted-foreground hover:bg-accent/50"
+            }`}
+          >
+            <span className="max-w-[100px] truncate">{conv.title}</span>
+            <Trash2
+              className="h-3 w-3 opacity-0 group-hover:opacity-100 hover:text-destructive"
+              onClick={(e) => { e.stopPropagation(); deleteConversation(conv.id) }}
+            />
+          </button>
+        ))}
+        <div className="ml-auto flex items-center gap-1">
           {saveStatus && <span className="text-xs text-muted-foreground">{saveStatus}</span>}
           <button onClick={onClose} className="rounded p-1 text-muted-foreground hover:bg-accent">
             <X className="h-3.5 w-3.5" />
@@ -245,13 +297,13 @@ ${context}`
 
       {/* Messages */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto px-3 py-2 space-y-3">
-        {messages.length === 0 && !streaming ? (
+        {activeMessages.length === 0 && !isStreaming ? (
           <p className="text-center text-xs text-muted-foreground py-8">
             输入关于大纲的问题或指令，AI 会基于当前大纲和章节内容进行回答和创作。
           </p>
         ) : null}
-        {messages.map((msg, i) => (
-          <div key={i} className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
+        {activeMessages.map((msg, i) => (
+          <div key={msg.id} className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
             <div className={`max-w-[85%] rounded-lg px-3 py-2 text-sm ${
               msg.role === "user"
                 ? "bg-primary text-primary-foreground"
@@ -260,47 +312,34 @@ ${context}`
               {msg.role === "assistant" ? (
                 <>
                   <div className="prose prose-sm dark:prose-invert max-w-none">
-                    <ReactMarkdown>{msg.content}</ReactMarkdown>
+                    <ReactMarkdown>{msg.content || (isStreaming && i === activeMessages.length - 1 ? streamingContent : "")}</ReactMarkdown>
                   </div>
-                  {/* 引用资料 */}
-                  {lastSources.length > 0 && i === messages.length - 1 ? (
+                  {/* Sources */}
+                  {msg.sources && msg.sources.length > 0 && !isStreaming ? (
                     <details className="mt-2 border-t pt-2">
                       <summary className="flex cursor-pointer items-center gap-1 text-xs text-muted-foreground hover:text-foreground">
                         <FileText className="h-3 w-3" />
-                        引用资料（{lastSources.length}）
+                        引用资料（{msg.sources.length}）
                       </summary>
                       <ul className="mt-1 space-y-0.5 text-xs text-muted-foreground">
-                        {lastSources.map((src, si) => (
-                          <li key={si}>• {src}</li>
-                        ))}
+                        {msg.sources.map((src, si) => <li key={si}>• {src}</li>)}
                       </ul>
                     </details>
                   ) : null}
-                  {/* 操作按钮 */}
-                  <div className="mt-2 flex gap-2 border-t pt-2">
-                    <button
-                      onClick={() => void handleSaveAsOutline(msg.content)}
-                      className="inline-flex items-center gap-1 rounded border px-2 py-0.5 text-xs hover:bg-accent"
-                    >
-                      <Save className="h-3 w-3" />
-                      保存为大纲
-                    </button>
-                    <button
-                      onClick={() => handleCopy(msg.content, i)}
-                      className="inline-flex items-center gap-1 rounded border px-2 py-0.5 text-xs hover:bg-accent"
-                    >
-                      <Copy className="h-3 w-3" />
-                      {copied === i ? "已复制" : "复制"}
-                    </button>
-                    <button
-                      onClick={() => void handleRegenerate(i)}
-                      disabled={streaming}
-                      className="inline-flex items-center gap-1 rounded border px-2 py-0.5 text-xs hover:bg-accent disabled:opacity-50"
-                    >
-                      <RefreshCw className="h-3 w-3" />
-                      重新生成
-                    </button>
-                  </div>
+                  {/* Action buttons */}
+                  {msg.content && !isStreaming ? (
+                    <div className="mt-2 flex gap-2 border-t pt-2">
+                      <button onClick={() => void handleSaveAsOutline(msg.content)} className="inline-flex items-center gap-1 rounded border px-2 py-0.5 text-xs hover:bg-accent">
+                        <Save className="h-3 w-3" /> 保存为大纲
+                      </button>
+                      <button onClick={() => handleCopy(msg.content, msg.id)} className="inline-flex items-center gap-1 rounded border px-2 py-0.5 text-xs hover:bg-accent">
+                        <Copy className="h-3 w-3" /> {copied === msg.id ? "已复制" : "复制"}
+                      </button>
+                      <button onClick={() => void handleRegenerate(i)} disabled={isStreaming} className="inline-flex items-center gap-1 rounded border px-2 py-0.5 text-xs hover:bg-accent disabled:opacity-50">
+                        <RefreshCw className="h-3 w-3" /> 重新生成
+                      </button>
+                    </div>
+                  ) : null}
                 </>
               ) : (
                 <span>{msg.content}</span>
@@ -308,15 +347,17 @@ ${context}`
             </div>
           </div>
         ))}
-        {streaming && streamContent ? (
-          <div className="flex justify-start">
-            <div className="max-w-[85%] rounded-lg bg-muted px-3 py-2 text-sm text-foreground">
-              <div className="prose prose-sm dark:prose-invert max-w-none">
-                <ReactMarkdown>{streamContent}</ReactMarkdown>
+        {isStreaming && streamingContent && activeMessages.length > 0 && activeMessages[activeMessages.length - 1]?.content === "" ? null : (
+          isStreaming && streamingContent && activeMessages[activeMessages.length - 1]?.role !== "assistant" ? (
+            <div className="flex justify-start">
+              <div className="max-w-[85%] rounded-lg bg-muted px-3 py-2 text-sm text-foreground">
+                <div className="prose prose-sm dark:prose-invert max-w-none">
+                  <ReactMarkdown>{streamingContent}</ReactMarkdown>
+                </div>
               </div>
             </div>
-          </div>
-        ) : null}
+          ) : null
+        )}
       </div>
 
       {/* Input */}
@@ -328,16 +369,26 @@ ${context}`
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void handleSend() } }}
             placeholder="输入关于大纲的问题..."
-            disabled={streaming}
+            disabled={isStreaming}
             className="flex-1 rounded-md border border-border bg-background px-3 py-1.5 text-sm outline-none focus:border-ring disabled:opacity-50"
           />
-          <button
-            onClick={() => void handleSend()}
-            disabled={streaming || !input.trim()}
-            className="rounded-md bg-primary px-3 py-1.5 text-sm text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
-          >
-            <Send className="h-4 w-4" />
-          </button>
+          {isStreaming ? (
+            <button
+              onClick={handleStop}
+              className="rounded-md bg-destructive px-3 py-1.5 text-sm text-destructive-foreground hover:bg-destructive/90"
+              title="停止生成"
+            >
+              <Square className="h-4 w-4" />
+            </button>
+          ) : (
+            <button
+              onClick={() => void handleSend()}
+              disabled={!input.trim()}
+              className="rounded-md bg-primary px-3 py-1.5 text-sm text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+            >
+              <Send className="h-4 w-4" />
+            </button>
+          )}
         </div>
       </div>
     </div>

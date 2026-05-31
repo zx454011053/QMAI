@@ -46,8 +46,7 @@ export async function listScopeFiles(
 export async function readScopeFileContents(
   projectPath: string,
   scope: "chapters" | "outlines",
-  maxFiles = 15,
-  maxCharsPerFile = 8000,
+  maxFiles = 20,
 ): Promise<{ name: string; path: string; content: string }[]> {
   const files = await listScopeFiles(projectPath, scope)
   const results: { name: string; path: string; content: string }[] = []
@@ -55,10 +54,7 @@ export async function readScopeFileContents(
   for (const file of files.slice(0, maxFiles)) {
     try {
       const content = await readFile(file.path)
-      const trimmed = content.length > maxCharsPerFile
-        ? content.slice(0, maxCharsPerFile) + "\n...(内容已截断)"
-        : content
-      results.push({ ...file, content: trimmed })
+      results.push({ ...file, content })
     } catch {
       // skip unreadable files
     }

@@ -8,7 +8,6 @@ import { setLastQueryPages, useSourceFiles } from "./chat-shared"
 import { ChatInput } from "./chat-input"
 import { useChatStore, chatMessagesToLLM } from "@/stores/chat-store"
 import { useWikiStore } from "@/stores/wiki-store"
-import { useReviewStore } from "@/stores/review-store"
 import { streamChat, type ChatMessage as LLMMessage } from "@/lib/llm-client"
 import { executeIngestWrites } from "@/lib/ingest"
 import { routeTask, buildTaskDirective } from "@/lib/novel/task-router"
@@ -21,7 +20,6 @@ import { normalizePath, getFileName, getRelativePath } from "@/lib/path-utils"
 import { getOutputLanguage, buildLanguageReminder } from "@/lib/output-language"
 import { isGreeting } from "@/lib/greeting-detector"
 import { computeContextBudget } from "@/lib/context-budget"
-import { hasUsableLlm } from "@/lib/has-usable-llm"
 import { getConversationTabTitle, sortConversationsByUpdatedAt } from "@/lib/workspace-layout"
 
 function formatDate(timestamp: number): string {
@@ -147,6 +145,7 @@ export function ChatPanel() {
   const scrollContainerRef = useRef<HTMLDivElement>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
   const soulDialogResolverRef = useRef<((confirmed: boolean) => void) | null>(null)
+  const userScrolledUpRef = useRef(false)
 
   const [chapterSaveStatus, setChapterSaveStatus] = useState<string>("")
   const [isSavingChapter, setIsSavingChapter] = useState(false)
@@ -186,7 +185,7 @@ export function ChatPanel() {
         "---",
         `type: chapter`,
         `chapter_number: ${nextNum}`,
-        `chapter_status: final`,
+        `chapter_status: draft`,
         `title: "${chapterTitle}"`,
         `created: ${now}`,
         "---",
@@ -196,53 +195,7 @@ export function ChatPanel() {
 
       await writeFile(chapterPath, fullContent)
 
-      const novelConfig = useWikiStore.getState().novelConfig
-      if (novelConfig.reviewBeforeSave) {
-        setChapterSaveStatus(t("chat.reviewing"))
-        const { reviewChapter } = await import("@/lib/novel/review-adapter")
-        const results = await reviewChapter(pp, fullContent, nextNum)
-        if (results.length > 0) {
-          const reviewStore = useReviewStore.getState()
-          reviewStore.addNovelReviewEntry({
-            id: `chapter-${nextNum}-${Date.now()}`,
-            chapterNumber: nextNum,
-            results,
-            createdAt: new Date().toISOString(),
-            resolved: false,
-          })
-        }
-        const errors = results.filter(r => r.severity === "error")
-        if (errors.length > 0) {
-          setChapterSaveStatus(t("chat.reviewFound", {
-            errors: errors.length,
-            warnings: results.filter(r => r.severity === "warning").length,
-          }))
-          setIsSavingChapter(false)
-          return
-        }
-      }
-
-      if (novelConfig.autoIngestOnSave) {
-        const llmConfig = useWikiStore.getState().llmConfig
-        if (!hasUsableLlm(llmConfig)) {
-          setChapterSaveStatus(t("chat.llmMissingSkipIngest"))
-        } else {
-          try {
-            const { ingestChapter } = await import("@/lib/novel/chapter-ingest")
-            const result = await ingestChapter(pp, chapterPath)
-            if (result.snapshot) {
-              setChapterSaveStatus(t("chat.savedChapterWithMemory", { chapter: result.snapshot.chapterNumber }))
-            } else {
-              setChapterSaveStatus(t("chat.savedChapterWithoutSnapshot"))
-            }
-          } catch (error) {
-            const message = error instanceof Error ? error.message : String(error)
-            setChapterSaveStatus(t("chat.savedChapterSnapshotFailed", { message }))
-          }
-        }
-      } else {
-        setChapterSaveStatus(t("chat.savedFormalChapter"))
-      }
+      setChapterSaveStatus(t("chat.savedChapterDraft", { chapter: nextNum, defaultValue: `已保存为第${nextNum}章草稿` }))
 
       const tree = await listDirectory(pp)
       useWikiStore.getState().setFileTree(tree)
@@ -256,12 +209,38 @@ export function ChatPanel() {
   }, [project])
 
   // Auto-scroll to bottom when messages change or streaming content updates
+  // But stop if user manually scrolled up
   useEffect(() => {
     const container = scrollContainerRef.current
-    if (container) {
+    if (!container) return
+    if (!userScrolledUpRef.current) {
       container.scrollTop = container.scrollHeight
     }
   }, [activeMessages, streamingContent])
+
+  // Detect user scroll: if user scrolls up, stop auto-scroll; if at bottom, resume
+  useEffect(() => {
+    const container = scrollContainerRef.current
+    if (!container) return
+    const handleScroll = () => {
+      const threshold = 50
+      const atBottom = container.scrollHeight - container.scrollTop - container.clientHeight < threshold
+      userScrolledUpRef.current = !atBottom
+    }
+    container.addEventListener("scroll", handleScroll)
+    return () => container.removeEventListener("scroll", handleScroll)
+  }, [])
+
+  // Reset scroll lock when streaming ends or conversation changes
+  useEffect(() => {
+    if (!isStreaming) {
+      userScrolledUpRef.current = false
+    }
+  }, [isStreaming])
+
+  useEffect(() => {
+    userScrolledUpRef.current = false
+  }, [activeConversationId])
 
   const handleSend = useCallback(
     async (text: string) => {

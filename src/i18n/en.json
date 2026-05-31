@@ -202,11 +202,9 @@
   "iconSidebar": {
     "toggleSidebar": "Expand or collapse chapter sidebar",
     "logoAlt": "Qingmu AI Writing",
-    "daemonRunning": "Clip server running",
-    "daemonStarting": "Clip server starting...",
-    "daemonPortConflict": "Port {{port}} is occupied. Web Clipper unavailable.",
-    "daemonError": "Clip server error. Restarting...",
-    "daemonStopped": "Web clip port is closed"
+    "modelConnected": "Model connected",
+    "modelChecking": "Checking model connection...",
+    "modelDisconnected": "Model connection failed, check settings"
   },
   "welcome": {
     "newProject": "New Novel",

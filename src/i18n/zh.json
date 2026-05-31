@@ -88,11 +88,9 @@
   "iconSidebar": {
     "toggleSidebar": "展开或隐藏章节栏",
     "logoAlt": "青幕AI写作",
-    "daemonRunning": "Clip 服务运行中",
-    "daemonStarting": "Clip 服务启动中...",
-    "daemonPortConflict": "{{port}} 端口已被占用，网页剪藏不可用。",
-    "daemonError": "Clip 服务异常，正在重启...",
-    "daemonStopped": "网页剪藏端口已关闭"
+    "modelConnected": "模型连接正常",
+    "modelChecking": "正在检测模型连接...",
+    "modelDisconnected": "模型连接失败，请检查设置"
   },
   "welcome": {
     "newProject": "新建小说",

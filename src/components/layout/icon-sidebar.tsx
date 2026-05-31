@@ -9,7 +9,6 @@ import { useTranslation } from "react-i18next"
 import logoImg from "@/assets/QM-LOGO.png"
 import type { WikiState } from "@/stores/wiki-store"
 import { saveTheme } from "@/lib/project-store"
-import { getClipServerConfig, type ClipServerRuntimeConfig } from "@/commands/clip-server"
 
 type NavView = WikiState["activeView"]
 
@@ -83,25 +82,55 @@ export function IconSidebar({ onToggleSidebar, onOpenSidebar, onSwitchProject }:
     }
   }
 
-  // Daemon health check
-  const [clipServer, setClipServer] = useState<ClipServerRuntimeConfig>({
-    enabled: true,
-    port: 19827,
-    status: "starting",
-  })
+  // Model connection status check
+  const llmConfig = useWikiStore((s) => s.llmConfig)
+  const [modelStatus, setModelStatus] = useState<"connected" | "checking" | "disconnected">("checking")
   useEffect(() => {
-    const check = async () => {
+    const checkModel = async () => {
       try {
-        setClipServer(await getClipServerConfig())
+        const { hasUsableLlm } = await import("@/lib/has-usable-llm")
+        if (!hasUsableLlm(llmConfig)) {
+          setModelStatus("disconnected")
+          return
+        }
+        // Build the models endpoint based on provider
+        const { getHttpFetch } = await import("@/lib/tauri-fetch")
+        const httpFetch = await getHttpFetch()
+        let baseUrl = ""
+        if (llmConfig.provider === "ollama") {
+          baseUrl = llmConfig.ollamaUrl?.replace(/\/+$/, "") || "http://127.0.0.1:11434"
+        } else if (llmConfig.provider === "custom" || llmConfig.provider === "minimax") {
+          baseUrl = llmConfig.customEndpoint?.replace(/\/+$/, "").replace(/\/chat\/completions$/i, "").replace(/\/v1$/i, "") || ""
+        } else if (llmConfig.provider === "openai") {
+          baseUrl = "https://api.openai.com/v1"
+        } else if (llmConfig.provider === "anthropic") {
+          baseUrl = "https://api.anthropic.com"
+        } else {
+          // claude-code, codex-cli etc. — assume connected if hasUsableLlm
+          setModelStatus("connected")
+          return
+        }
+        if (!baseUrl) {
+          setModelStatus("disconnected")
+          return
+        }
+        const modelsUrl = `${baseUrl}/models`
+        const headers: Record<string, string> = {}
+        if (llmConfig.apiKey) headers["Authorization"] = `Bearer ${llmConfig.apiKey}`
+        const response = await httpFetch(modelsUrl, {
+          method: "GET",
+          headers,
+          signal: AbortSignal.timeout(8000),
+        })
+        setModelStatus(response.ok ? "connected" : "disconnected")
       } catch {
-        setClipServer((current) => ({ ...current, status: "error" }))
+        setModelStatus("disconnected")
       }
     }
-    check()
-    const interval = setInterval(check, 30000)
+    checkModel()
+    const interval = setInterval(checkModel, 60000)
     return () => clearInterval(interval)
-  }, [])
-  const daemonStatus = clipServer.status
+  }, [llmConfig])
 
   const handleNavClick = (view: NavView) => {
     setSearchPanelOpen(false)
@@ -204,25 +233,21 @@ export function IconSidebar({ onToggleSidebar, onOpenSidebar, onSwitchProject }:
         </div>
         {/* Bottom: daemon status + theme toggle + settings + switch project */}
         <div className="flex flex-col items-center gap-1 pb-1">
-          {/* Daemon status indicator */}
+          {/* Model connection status indicator */}
           <Tooltip>
             <TooltipTrigger className="flex h-6 w-6 items-center justify-center">
               <span
                 className={`h-2.5 w-2.5 rounded-full ${
-                  daemonStatus === "running" ? "bg-emerald-500" :
-                  daemonStatus === "starting" ? "bg-amber-400 animate-pulse" :
-                  daemonStatus === "port_conflict" ? "bg-red-500" :
-                  daemonStatus === "stopped" ? "bg-muted-foreground" :
-                  "bg-red-500 animate-pulse"
+                  modelStatus === "connected" ? "bg-emerald-500" :
+                  modelStatus === "checking" ? "bg-amber-400 animate-pulse" :
+                  "bg-red-500"
                 }`}
               />
             </TooltipTrigger>
             <TooltipContent side="right">
-              {daemonStatus === "running" && t("iconSidebar.daemonRunning")}
-              {daemonStatus === "starting" && t("iconSidebar.daemonStarting")}
-              {daemonStatus === "port_conflict" && t("iconSidebar.daemonPortConflict", { port: clipServer.port })}
-              {daemonStatus === "stopped" && t("iconSidebar.daemonStopped")}
-              {daemonStatus === "error" && t("iconSidebar.daemonError")}
+              {modelStatus === "connected" && t("iconSidebar.modelConnected")}
+              {modelStatus === "checking" && t("iconSidebar.modelChecking")}
+              {modelStatus === "disconnected" && t("iconSidebar.modelDisconnected")}
             </TooltipContent>
           </Tooltip>
           {/* Theme toggle */}

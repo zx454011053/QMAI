@@ -48,41 +48,41 @@ export function ChangelogSection() {
     setUpdateStatus("downloading")
     setDownloadProgress(0)
     try {
-      const update = updateHandleRef.current as { downloadAndInstall: (onEvent?: (event: { event: string; data: { contentLength?: number; chunkLength?: number } }) => void) => Promise<void> }
+      const update = updateHandleRef.current as {
+        download: (onEvent?: (event: { event: string; data: { contentLength?: number; chunkLength?: number } }) => void) => Promise<void>
+        install: () => Promise<void>
+      }
+      let totalSize = 0
       let downloaded = 0
-      await update.downloadAndInstall((event) => {
+      await update.download((event) => {
         if (event.event === "Started" && event.data.contentLength) {
+          totalSize = event.data.contentLength
           downloaded = 0
         } else if (event.event === "Progress" && event.data.chunkLength) {
           downloaded += event.data.chunkLength
-          // Estimate progress (contentLength may not be available in all events)
-          setDownloadProgress((prev) => Math.min(prev + 1, 99))
+          if (totalSize > 0) {
+            setDownloadProgress(Math.min(Math.round((downloaded / totalSize) * 100), 99))
+          } else {
+            setDownloadProgress((prev) => Math.min(prev + 1, 99))
+          }
         } else if (event.event === "Finished") {
           setDownloadProgress(100)
         }
       })
+      // 下载完成，不自动安装，等待用户确认
       setUpdateStatus("ready")
       setDownloadProgress(100)
     } catch (err) {
-      if (String(err).includes("restart")) {
-        setUpdateStatus("ready")
-        setDownloadProgress(100)
-      } else {
-        setUpdateStatus("error")
-        setErrorMessage(err instanceof Error ? err.message : String(err))
-      }
+      setUpdateStatus("error")
+      setErrorMessage(err instanceof Error ? err.message : String(err))
     }
   }
 
   async function handleInstallNow() {
-    if (!isTauri()) return
+    if (!updateHandleRef.current) return
     try {
-      // Tauri updater's downloadAndInstall typically auto-restarts on Windows
-      // If we have the update handle, calling it again triggers install
-      if (updateHandleRef.current) {
-        const update = updateHandleRef.current as { downloadAndInstall: () => Promise<void> }
-        await update.downloadAndInstall()
-      }
+      const update = updateHandleRef.current as { install: () => Promise<void> }
+      await update.install()
     } catch {
       // Expected: app restarts during install
     }
@@ -124,17 +124,6 @@ export function ChangelogSection() {
               <AlertCircle className="h-4 w-4" />
               {errorMessage || "检查更新失败"}
             </span>
-          ) : null}
-
-          {updateStatus === "ready" ? (
-            <button
-              type="button"
-              onClick={() => void handleInstallNow()}
-              className="inline-flex items-center gap-1.5 rounded-md bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700"
-            >
-              <Download className="h-4 w-4" />
-              立即安装
-            </button>
           ) : null}
         </div>
 
@@ -179,8 +168,16 @@ export function ChangelogSection() {
         {updateStatus === "ready" ? (
           <div className="mt-3 rounded-md border border-emerald-200 bg-emerald-50 p-3 dark:border-emerald-900/60 dark:bg-emerald-950/40">
             <p className="text-sm font-medium text-emerald-900 dark:text-emerald-200">
-              更新已下载完成，点击「立即安装」即可完成安装。
+              ✅ 更新已下载完成！安装时会关闭当前软件，请确保已保存编辑内容。
             </p>
+            <button
+              type="button"
+              onClick={() => void handleInstallNow()}
+              className="mt-2 inline-flex items-center gap-1.5 rounded-md bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700"
+            >
+              <Download className="h-4 w-4" />
+              立即安装
+            </button>
           </div>
         ) : null}
       </div>

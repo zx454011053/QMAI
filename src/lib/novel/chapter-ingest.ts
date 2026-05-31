@@ -806,7 +806,38 @@ export async function syncSnapshotToMemory(
   if (!syncedSnapshot) {
     throw new Error("Invalid snapshot data.")
   }
+
+  // 获取同步前该快照关联的旧实体文件（用于清理）
+  const entitiesDir = `${pp}/wiki/entities`
+  let oldEntityFiles: string[] = []
+  try {
+    const tree = await listDirectory(entitiesDir)
+    oldEntityFiles = tree.filter(f => f.name.endsWith(".md")).map(f => f.name)
+  } catch { /* entities dir may not exist */ }
+
   const writtenEntityPaths = await writeSnapshotToWiki(pp, syncedSnapshot)
+
+  // 清理旧实体：如果一个实体文件不在新写入列表中，且其内容引用了当前快照的 source，则删除
+  const writtenFileNames = new Set(writtenEntityPaths.map(p => p.split("/").pop() ?? ""))
+  const snapshotSourceFile = `${String(syncedSnapshot.chapterNumber < 0 ? `outline-${String(Math.abs(syncedSnapshot.chapterNumber)).padStart(3, "0")}` : String(syncedSnapshot.chapterNumber).padStart(3, "0"))}.snapshot.json`
+
+  for (const oldFile of oldEntityFiles) {
+    if (writtenFileNames.has(oldFile)) continue // 仍然存在于新快照中，保留
+    try {
+      const filePath = `${entitiesDir}/${oldFile}`
+      const content = await readFile(filePath)
+      // 只删除引用了当前快照 source 的实体文件
+      if (content.includes(snapshotSourceFile)) {
+        // 检查是否还被其他快照引用
+        const otherSourceMatch = content.match(/sources?:.*?\.snapshot\.json/g)
+        const allSources = otherSourceMatch?.map(m => m.match(/(\w+\.snapshot\.json)/)?.[1]).filter(Boolean) ?? []
+        const onlyCurrentSource = allSources.every(s => s === snapshotSourceFile)
+        if (onlyCurrentSource || allSources.length === 0) {
+          await deleteFile(filePath)
+        }
+      }
+    } catch { /* skip errors */ }
+  }
 
   if (syncedSnapshot.knowledgeChanges.length > 0) {
     const existing = await loadCognitionState(pp) ?? emptyCognitionState()

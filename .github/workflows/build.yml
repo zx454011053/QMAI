@@ -42,7 +42,7 @@ jobs:
               release-assets/*.app.tar.gz
 
           - label: macos-x64
-            runner: macos-13
+            runner: macos-15-intel
             rust_targets: "x86_64-apple-darwin"
             tauri_args: "--target x86_64-apple-darwin --bundles dmg,app --no-sign"
             pdfium_asset: "pdfium-mac-x64.tgz"

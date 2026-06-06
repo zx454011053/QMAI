@@ -253,7 +253,7 @@ export function DismantlingView() {
         </div>
       </header>
 
-      <div className="grid min-h-0 flex-1 grid-cols-[260px_minmax(0,1fr)_340px]">
+      <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_420px]">
         <aside className="min-h-0 border-r bg-muted/20">
           <div className="border-b p-3 text-sm font-medium">拆文作品</div>
           <div className="min-h-0 space-y-2 overflow-y-auto p-3">
@@ -278,16 +278,16 @@ export function DismantlingView() {
           </div>
         </aside>
 
-        <main className="min-h-0 overflow-y-auto p-4">
+        <main className="min-h-0 flex flex-col overflow-hidden">
           {!selectedProject ? (
-            <div className="flex h-full items-center justify-center rounded-xl border border-dashed text-sm text-muted-foreground">导入作品后可选择章节进行拆文。</div>
+            <div className="flex h-full items-center justify-center text-sm text-muted-foreground">请从左侧选择拆文作品</div>
           ) : (
-            <div className="space-y-4">
-              <section className="rounded-xl border bg-card p-4">
+            <>
+              <div className="border-b px-4 py-3">
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div>
                     <h2 className="text-lg font-semibold">{selectedProject.title}</h2>
-                    <p className="mt-1 text-sm text-muted-foreground">选择要拆的章节，并设置每批章节数。默认每批 3 章，长文本建议每批 1 章。</p>
+                    <p className="mt-1 text-sm text-muted-foreground">{selectedProject.chapters.length} 章 · {selectedProject.structureMemory.length} 条结构记忆</p>
                   </div>
                   <label className="flex items-center gap-2 text-sm">
                     <span>每批章节数</span>
@@ -300,87 +300,86 @@ export function DismantlingView() {
                     </select>
                   </label>
                 </div>
-              </section>
+              </div>
 
-              <section className="rounded-xl border bg-card">
-                <div className="flex items-center justify-between border-b px-4 py-3">
-                  <div className="text-sm font-medium">章节列表</div>
-                  <div className="flex gap-2">
-                    <Button variant="ghost" size="sm" onClick={() => setSelectedChapterIds(selectedProject.chapters.map((chapter) => chapter.id))}>全选</Button>
-                    <Button variant="ghost" size="sm" onClick={() => setSelectedChapterIds([])}>清空</Button>
+              <div className="min-h-0 flex-1 overflow-y-auto p-4 space-y-4">
+                <section className="rounded-xl border bg-card p-4">
+                  <div className="mb-3 flex items-center gap-2 text-sm font-medium">
+                    <CheckCircle2 className="h-4 w-4 text-primary" />
+                    使用拆文结构
                   </div>
-                </div>
-                <div className="divide-y">
-                  {selectedProject.chapters.map((chapter) => (
-                    <label key={chapter.id} className="flex cursor-pointer items-center gap-3 px-4 py-3 text-sm hover:bg-muted/40">
-                      <input
-                        type="checkbox"
-                        checked={selectedChapterIds.includes(chapter.id)}
-                        onChange={(event) => toggleChapter(chapter.id, event.target.checked)}
-                      />
-                      <span className="w-16 text-muted-foreground">第{chapter.chapterNumber}章</span>
-                      <span className="min-w-0 flex-1 truncate">{chapter.title}</span>
-                      <StatusBadge status={chapter.status} />
-                    </label>
-                  ))}
-                </div>
-              </section>
+                  <label className="flex items-start gap-3 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={Boolean(selectedProject.useInChat)}
+                      onChange={(event) => void toggleUseInChat(event.target.checked)}
+                    />
+                    <span>在 AI 会话写作时参考当前拆文作品的结构记忆。</span>
+                  </label>
+                  <p className="mt-3 text-xs leading-6 text-muted-foreground">只学习节奏、冲突推进、爽点安排和章节钩子；不得复用原作人物、设定、剧情和具体表达。</p>
+                </section>
 
-              <section className="rounded-xl border bg-card p-4">
-                <div className="mb-3 flex items-center gap-2 text-sm font-medium">
-                  <RefreshCw className="h-4 w-4" />
-                  最近拆文结果
-                </div>
-                {selectedProject.analyses.length === 0 ? (
-                  <div className="text-sm text-muted-foreground">还没有拆文结果。</div>
-                ) : (
-                  <div className="space-y-3">
-                    {selectedProject.analyses.slice(0, 3).map((analysis) => (
-                      <article key={analysis.id} className="rounded-lg border bg-background p-3">
-                        <div className="mb-2 text-sm font-medium">{analysis.title}</div>
-                        <pre className="max-h-64 overflow-auto whitespace-pre-wrap text-xs leading-6 text-muted-foreground">{analysis.markdown}</pre>
-                      </article>
+                <section className="rounded-xl border bg-card">
+                  <div className="flex items-center justify-between border-b px-4 py-3">
+                    <div className="text-sm font-medium">章节列表</div>
+                    <div className="flex gap-2">
+                      <Button variant="ghost" size="sm" onClick={() => setSelectedChapterIds(selectedProject.chapters.map((chapter) => chapter.id))}>全选</Button>
+                      <Button variant="ghost" size="sm" onClick={() => setSelectedChapterIds([])}>清空</Button>
+                    </div>
+                  </div>
+                  <div className="divide-y max-h-80 overflow-y-auto">
+                    {selectedProject.chapters.map((chapter) => (
+                      <label key={chapter.id} className="flex cursor-pointer items-center gap-3 px-4 py-3 text-sm hover:bg-muted/40">
+                        <input
+                          type="checkbox"
+                          checked={selectedChapterIds.includes(chapter.id)}
+                          onChange={(event) => toggleChapter(chapter.id, event.target.checked)}
+                        />
+                        <span className="w-16 text-muted-foreground">第{chapter.chapterNumber}章</span>
+                        <span className="min-w-0 flex-1 truncate">{chapter.title}</span>
+                        <StatusBadge status={chapter.status} />
+                      </label>
                     ))}
                   </div>
+                </section>
+
+                <section className="rounded-xl border bg-card p-4">
+                  <div className="mb-3 text-sm font-medium">结构记忆</div>
+                  {selectedProject.structureMemory.length === 0 ? (
+                    <div className="text-sm text-muted-foreground">拆文完成后，这里会显示可供 AI 引用的结构记忆。</div>
+                  ) : (
+                    <ul className="space-y-2 text-sm leading-6">
+                      {selectedProject.structureMemory.slice(0, 20).map((item) => <li key={item}>- {item}</li>)}
+                    </ul>
+                  )}
+                </section>
+
+                <section className="rounded-xl border bg-card p-4">
+                  <div className="mb-3 flex items-center gap-2 text-sm font-medium">
+                    <RefreshCw className="h-4 w-4" />
+                    最近拆文结果
+                  </div>
+                  {selectedProject.analyses.length === 0 ? (
+                    <div className="text-sm text-muted-foreground">还没有拆文结果。</div>
+                  ) : (
+                    <div className="space-y-3">
+                      {selectedProject.analyses.slice(0, 3).map((analysis) => (
+                        <article key={analysis.id} className="rounded-lg border bg-background p-3">
+                          <div className="mb-2 text-sm font-medium">{analysis.title}</div>
+                          <pre className="max-h-64 overflow-auto whitespace-pre-wrap text-xs leading-6 text-muted-foreground">{analysis.markdown}</pre>
+                        </article>
+                      ))}
+                    </div>
+                  )}
+                </section>
+
+                {status && (
+                  <div className="rounded-xl border bg-card p-4 text-sm leading-6 text-muted-foreground">{status}</div>
                 )}
-              </section>
-            </div>
+              </div>
+            </>
           )}
         </main>
-
-        <aside className="min-h-0 overflow-y-auto border-l bg-muted/20 p-4">
-          <section className="rounded-xl border bg-card p-4">
-            <div className="mb-3 flex items-center gap-2 text-sm font-medium">
-              <CheckCircle2 className="h-4 w-4 text-primary" />
-              使用拆文结构
-            </div>
-            <label className="flex items-start gap-3 text-sm">
-              <input
-                type="checkbox"
-                checked={Boolean(selectedProject?.useInChat)}
-                disabled={!selectedProject}
-                onChange={(event) => void toggleUseInChat(event.target.checked)}
-              />
-              <span>在 AI 会话写作时参考当前拆文作品的结构记忆。</span>
-            </label>
-            <p className="mt-3 text-xs leading-6 text-muted-foreground">只学习节奏、冲突推进、爽点安排和章节钩子；不得复用原作人物、设定、剧情和具体表达。</p>
-          </section>
-
-          <section className="mt-4 rounded-xl border bg-card p-4">
-            <div className="mb-3 text-sm font-medium">结构记忆</div>
-            {(selectedProject?.structureMemory.length ?? 0) === 0 ? (
-              <div className="text-sm text-muted-foreground">拆文完成后，这里会显示可供 AI 引用的结构记忆。</div>
-            ) : (
-              <ul className="space-y-2 text-sm leading-6">
-                {selectedProject?.structureMemory.slice(0, 20).map((item) => <li key={item}>- {item}</li>)}
-              </ul>
-            )}
-          </section>
-
-          {status && (
-            <div className="mt-4 rounded-xl border bg-card p-4 text-sm leading-6 text-muted-foreground">{status}</div>
-          )}
-        </aside>
       </div>
     </div>
   )

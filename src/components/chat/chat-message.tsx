@@ -14,7 +14,7 @@ import { readFile, listDirectory } from "@/commands/fs"
 import { normalizePath, getFileName } from "@/lib/path-utils"
 import { getLastQueryPages } from "@/components/chat/chat-shared"
 import { FileEditPreview } from "@/components/chat/file-edit-preview"
-import type { DisplayMessage } from "@/stores/chat-store"
+import type { DisplayMessage, UsageInfo } from "@/stores/chat-store"
 
 import { convertLatexToUnicode } from "@/lib/latex-to-unicode"
 import { resolveMarkdownImageSrc } from "@/lib/markdown-image-resolver"
@@ -40,6 +40,7 @@ export function ChatMessage({ message, isLastAssistant, onRegenerate, novelMode,
   const isUser = message.role === "user"
   const isSystem = message.role === "system"
   const isAssistant = message.role === "assistant"
+  const showCacheHitRate = useWikiStore((s) => s.llmConfig.showCacheHitRate ?? false)
   const [hovered, setHovered] = useState(false)
 
   return (
@@ -78,6 +79,9 @@ export function ChatMessage({ message, isLastAssistant, onRegenerate, novelMode,
           )}
         </div>
         {isAssistant && !message.discarded && <CitedReferencesPanel content={message.content} savedReferences={message.references} />}
+        {isAssistant && !message.discarded && showCacheHitRate && message.usage && (
+          <CacheHitRateBadge usage={message.usage} />
+        )}
         {isAssistant && !message.discarded && (
           <div className="flex items-center gap-1 flex-wrap">
             {novelMode && isLastAssistant && onSaveAsChapter && (
@@ -139,6 +143,35 @@ function CopyButton({ content }: { content: string }) {
       {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
       {copied ? "已复制" : "复制"}
     </button>
+  )
+}
+
+function formatCacheHitRate(usage: UsageInfo): string | null {
+  const hit = usage.promptCacheHitTokens
+  const miss = usage.promptCacheMissTokens
+  if (hit == null && miss == null) return null
+
+  const hitCount = hit ?? 0
+  const missCount = miss ?? 0
+  const total = hitCount + missCount
+  if (total <= 0) return null
+
+  const rate = (hitCount / total) * 100
+  const fmt = (n: number) => n.toLocaleString()
+  return `提示缓存命中 ${rate.toFixed(1)}%（${fmt(hitCount)} / ${fmt(total)} tokens）`
+}
+
+function CacheHitRateBadge({ usage }: { usage: UsageInfo }) {
+  const label = formatCacheHitRate(usage)
+  if (!label) return null
+
+  return (
+    <p
+      className="text-[11px] text-muted-foreground"
+      title="DeepSeek 上下文硬盘缓存命中率。重复前缀会从缓存读取，计入 prompt_cache_hit_tokens。"
+    >
+      {label}
+    </p>
   )
 }
 

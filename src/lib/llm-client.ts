@@ -2,15 +2,75 @@ import type { LlmConfig } from "@/stores/wiki-store"
 import { getProviderConfig, type RequestOverrides } from "./llm-providers"
 import { getHttpFetch, isFetchNetworkError } from "./tauri-fetch"
 import { countReasoningCharsInLine, extractReasoningTextFromLine } from "./reasoning-detector"
+import {
+  makeLlmUsageScopeKey,
+  serializeMessageContent,
+  type LlmUsageTracking,
+} from "./llm-usage"
+import { useLlmUsageStore } from "@/stores/llm-usage-store"
 
 export type { ChatMessage, RequestOverrides } from "./llm-providers"
+export type { LlmUsageTracking } from "./llm-usage"
 export { isFetchNetworkError } from "./tauri-fetch"
+
+export interface UsageData {
+  promptTokens?: number
+  completionTokens?: number
+  promptCacheHitTokens?: number
+  promptCacheMissTokens?: number
+}
 
 export interface StreamCallbacks {
   onToken: (token: string) => void
   onReasoningToken?: (token: string) => void
+  onUsage?: (usage: UsageData) => void
   onDone: () => void
   onError: (error: Error) => void
+}
+
+function wrapStreamChatCallbacks(
+  config: LlmConfig,
+  messages: import("./llm-providers").ChatMessage[],
+  callbacks: StreamCallbacks,
+  usageTracking?: LlmUsageTracking,
+): StreamCallbacks {
+  if (!usageTracking) return callbacks
+
+  const startedAt = Date.now()
+  let capturedUsage: UsageData | undefined
+  const scopeKey = makeLlmUsageScopeKey(usageTracking.projectPath, usageTracking.filePath)
+  const serializedMessages = messages.map((message) => ({
+    role: message.role,
+    content: serializeMessageContent(message.content),
+  }))
+
+  const persistRecord = (error?: string) => {
+    useLlmUsageStore.getState().addRecord(scopeKey, {
+      label: usageTracking.label,
+      model: config.model,
+      provider: config.provider,
+      messages: serializedMessages,
+      usage: capturedUsage,
+      error,
+      durationMs: Date.now() - startedAt,
+    })
+  }
+
+  return {
+    ...callbacks,
+    onUsage: (usage) => {
+      capturedUsage = usage
+      callbacks.onUsage?.(usage)
+    },
+    onDone: () => {
+      persistRecord()
+      callbacks.onDone()
+    },
+    onError: (error) => {
+      persistRecord(error.message)
+      callbacks.onError(error)
+    },
+  }
 }
 
 // Lazy import keeps the Tauri event/invoke bindings out of bundles that
@@ -60,18 +120,23 @@ export async function streamChat(
    * with "Unknown name 'temperature': Cannot find field." HTTP 400.
    */
   requestOverrides?: RequestOverrides,
+  usageTracking?: LlmUsageTracking,
 ): Promise<void> {
-  const { onToken, onDone, onError } = callbacks
+  const mergedOverrides: RequestOverrides | undefined = usageTracking
+    ? { ...(requestOverrides ?? {}), includeStreamUsage: true }
+    : requestOverrides
+  const activeCallbacks = wrapStreamChatCallbacks(config, messages, callbacks, usageTracking)
+  const { onToken, onDone, onError, onUsage } = activeCallbacks
 
   // Claude Code CLI uses a subprocess transport (stdin/stdout), not
   // HTTP. Dispatch before getProviderConfig — that function throws for
   // this provider because it has no URL/headers.
   if (config.provider === "claude-code") {
-    return streamViaClaudeCodeCli(config, messages, callbacks, signal, requestOverrides)
+    return streamViaClaudeCodeCli(config, messages, activeCallbacks, signal, mergedOverrides)
   }
 
   if (config.provider === "codex-cli") {
-    return streamViaCodexCli(config, messages, callbacks, signal, requestOverrides)
+    return streamViaCodexCli(config, messages, activeCallbacks, signal, mergedOverrides)
   }
 
   const providerConfig = getProviderConfig(config)
@@ -105,7 +170,7 @@ export async function streamChat(
 
   let response: Response
   try {
-    const body = providerConfig.buildBody(messages, requestOverrides)
+    const body = providerConfig.buildBody(messages, mergedOverrides)
     const httpFetch = await getHttpFetch()
     response = await httpFetch(providerConfig.url, {
       method: "POST",
@@ -184,7 +249,16 @@ export async function streamChat(
   const recordReasoning = (line: string) => {
     const reasoningParts = extractReasoningTextFromLine(line)
     for (const part of reasoningParts) {
-      callbacks.onReasoningToken?.(part)
+      activeCallbacks.onReasoningToken?.(part)
+    }
+  }
+
+  // Track usage data from the final chunk (DeepSeek prompt cache stats)
+  const recordUsage = (line: string) => {
+    if (!providerConfig.parseStreamWithUsage || !onUsage) return
+    const result = providerConfig.parseStreamWithUsage(line)
+    if (result.usage) {
+      onUsage(result.usage)
     }
   }
 
@@ -197,6 +271,7 @@ export async function streamChat(
           const trimmed = lineBuffer.trim()
           reasoningCharsObserved += countReasoningCharsInLine(trimmed)
           recordReasoning(trimmed)
+          recordUsage(trimmed)
           const token = providerConfig.parseStream(trimmed)
           if (token !== null) recordToken(token)
         }
@@ -211,6 +286,7 @@ export async function streamChat(
         if (!trimmed) continue
         reasoningCharsObserved += countReasoningCharsInLine(trimmed)
         recordReasoning(trimmed)
+        recordUsage(trimmed)
         const token = providerConfig.parseStream(trimmed)
         if (token !== null) recordToken(token)
       }

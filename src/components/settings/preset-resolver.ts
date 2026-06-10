@@ -32,6 +32,19 @@ export function resolveConfig(
     }
   }
 
+  if (preset.provider === "deepseek") {
+    return {
+      provider: "deepseek",
+      apiKey,
+      model,
+      ollamaUrl: fallback.ollamaUrl,
+      customEndpoint: ov.baseUrl ?? preset.baseUrl ?? "https://api.deepseek.com/v1",
+      maxContextSize,
+      reasoning,
+      showCacheHitRate: ov.showCacheHitRate ?? false,
+    }
+  }
+
   if (preset.provider === "ollama") {
     return {
       provider: "ollama",

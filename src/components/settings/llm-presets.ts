@@ -9,6 +9,7 @@ export type Provider =
   | "minimax"
   | "claude-code"
   | "codex-cli"
+  | "deepseek"
 
 export interface LlmPreset {
   id: string
@@ -24,6 +25,16 @@ export interface LlmPreset {
 }
 
 export const LLM_PRESETS: LlmPreset[] = [
+  {
+    id: "deepseek",
+    label: "DeepSeek",
+    hint: "DeepSeek 原生 API",
+    provider: "deepseek",
+    baseUrl: "https://api.deepseek.com/v1",
+    defaultModel: "deepseek-v4-flash",
+    suggestedModels: ["deepseek-v4-flash", "deepseek-v4-pro"],
+    suggestedContextSize: 1000000,
+  },
   {
     id: "custom",
     label: "自定义模型",

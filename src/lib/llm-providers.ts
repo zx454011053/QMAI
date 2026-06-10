@@ -51,6 +51,18 @@ export interface RequestOverrides {
   max_tokens?: number
   stop?: string | string[]
   reasoning?: ReasoningConfig
+  /** Request token usage in the final stream chunk (OpenAI-compatible APIs). */
+  includeStreamUsage?: boolean
+}
+
+export interface StreamParseResult {
+  token: string | null
+  usage?: {
+    promptTokens?: number
+    completionTokens?: number
+    promptCacheHitTokens?: number
+    promptCacheMissTokens?: number
+  }
 }
 
 interface ProviderConfig {
@@ -58,6 +70,7 @@ interface ProviderConfig {
   headers: Record<string, string>
   buildBody: (messages: ChatMessage[], overrides?: RequestOverrides) => unknown
   parseStream: (line: string) => string | null
+  parseStreamWithUsage?: (line: string) => StreamParseResult
 }
 
 const JSON_CONTENT_TYPE = "application/json"
@@ -125,6 +138,35 @@ function parseOpenAiLine(line: string): string | null {
     return parsed.choices?.[0]?.delta?.content ?? null
   } catch {
     return null
+  }
+}
+
+function parseOpenAiLineWithUsage(line: string): StreamParseResult {
+  if (!line.startsWith("data: ")) return { token: null }
+  const data = line.slice(6).trim()
+  if (data === "[DONE]") return { token: null }
+  try {
+    const parsed = JSON.parse(data) as {
+      choices?: Array<{ delta: { content?: string } }>
+      usage?: {
+        prompt_tokens?: number
+        completion_tokens?: number
+        prompt_cache_hit_tokens?: number
+        prompt_cache_miss_tokens?: number
+      }
+    }
+    const token = parsed.choices?.[0]?.delta?.content ?? null
+    const usage = parsed.usage
+      ? {
+          promptTokens: parsed.usage.prompt_tokens,
+          completionTokens: parsed.usage.completion_tokens,
+          promptCacheHitTokens: parsed.usage.prompt_cache_hit_tokens,
+          promptCacheMissTokens: parsed.usage.prompt_cache_miss_tokens,
+        }
+      : undefined
+    return { token, usage }
+  } catch {
+    return { token: null }
   }
 }
 
@@ -233,7 +275,7 @@ function effectiveReasoning(config: LlmConfig, overrides?: RequestOverrides): Re
 }
 
 function isDeepSeekEndpoint(config: LlmConfig): boolean {
-  return /deepseek/i.test(config.model) || /deepseek/i.test(config.customEndpoint)
+  return config.provider === "deepseek" || /deepseek/i.test(config.model) || /deepseek/i.test(config.customEndpoint)
 }
 
 function isQwenThinkingModel(model: string): boolean {
@@ -294,13 +336,26 @@ function buildOpenAiCompatibleBody(
     // important path for ingestion/rewrite tasks: it prevents the model
     // from spending the whole response on `reasoning_content` with no
     // final `content`.
+    //
+    // DeepSeek V4 reasoning_effort mapping (per 2026-06 docs):
+    //   low, medium → high
+    //   high, xhigh → high, max
+    //   max → max
     if (reasoning.mode === "off") {
       body.thinking = { type: "disabled" }
     } else if (reasoning.mode !== "auto") {
       body.thinking = { type: "enabled" }
-      if (reasoning.mode === "high" || reasoning.mode === "max") {
-        body.reasoning_effort = reasoning.mode
+      if (reasoning.mode === "low" || reasoning.mode === "medium") {
+        body.reasoning_effort = "high"
+      } else if (reasoning.mode === "high" || reasoning.mode === "max" || reasoning.mode === "custom") {
+        body.reasoning_effort = reasoning.mode === "max" ? "max" : "high"
       }
+    }
+    // DeepSeek returns prompt_cache_hit_tokens / prompt_cache_miss_tokens
+    // in the final stream chunk when include_usage is set. See:
+    // https://api-docs.deepseek.com/zh-cn/guides/kv_cache
+    if (config.showCacheHitRate || overrides?.includeStreamUsage) {
+      body.stream_options = { include_usage: true }
     }
     return body
   }
@@ -313,6 +368,10 @@ function buildOpenAiCompatibleBody(
     if (reasoning.mode === "low" || reasoning.mode === "medium" || reasoning.mode === "high") {
       body.reasoning_effort = reasoning.mode
     }
+  }
+
+  if (overrides?.includeStreamUsage && !body.stream_options) {
+    body.stream_options = { include_usage: true }
   }
 
   return body
@@ -579,6 +638,7 @@ export function getProviderConfig(config: LlmConfig): ProviderConfig {
           model,
         }),
         parseStream: parseOpenAiLine,
+        parseStreamWithUsage: parseOpenAiLineWithUsage,
       }
 
     case "anthropic": {
@@ -636,6 +696,23 @@ export function getProviderConfig(config: LlmConfig): ProviderConfig {
           model,
         }),
         parseStream: parseOpenAiLine,
+        parseStreamWithUsage: parseOpenAiLineWithUsage,
+      }
+    }
+
+    case "deepseek": {
+      return {
+        url: "https://api.deepseek.com/v1/chat/completions",
+        headers: {
+          "Content-Type": JSON_CONTENT_TYPE,
+          Authorization: `Bearer ${apiKey}`,
+        },
+        buildBody: (messages, overrides) => ({
+          ...buildOpenAiCompatibleBody(config, messages, overrides),
+          model,
+        }),
+        parseStream: parseOpenAiLine,
+        parseStreamWithUsage: parseOpenAiLineWithUsage,
       }
     }
 
@@ -708,6 +785,7 @@ export function getProviderConfig(config: LlmConfig): ProviderConfig {
           model,
         }),
         parseStream: parseOpenAiLine,
+        parseStreamWithUsage: parseOpenAiLineWithUsage,
       }
     }
 

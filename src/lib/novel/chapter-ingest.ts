@@ -320,7 +320,7 @@ export async function ingestChapter(
   }
   const body = parsed.body
 
-  const extractedSnapshot = await extractSnapshotWithLLM(chapterNumber, body, runtimeLlmConfig)
+  const extractedSnapshot = await extractSnapshotWithLLM(chapterNumber, body, runtimeLlmConfig, pp, chapterPath)
   const snapshot = extractedSnapshot ? canonicalizeSnapshotCharacters(extractedSnapshot) : null
 
   if (!snapshot) {
@@ -512,6 +512,8 @@ async function extractSnapshotWithLLM(
   chapterNumber: number,
   chapterBody: string,
   llmConfig: LlmConfig,
+  projectPath: string,
+  chapterPath: string,
 ): Promise<ChapterSnapshot | null> {
   const outputLang = getOutputLanguage()
   const langReminder = buildLanguageReminder(outputLang)
@@ -613,7 +615,19 @@ ${chapterBody.slice(0, 8000)}
       },
     }
 
-    await streamChat(llmConfig, messages, callbacks, AbortSignal.timeout(180000))
+    await streamChat(
+      llmConfig,
+      messages,
+      callbacks,
+      AbortSignal.timeout(180000),
+      undefined,
+      {
+        projectPath,
+        filePath: normalizePath(chapterPath),
+        scope: "chapter",
+        label: "章节记忆提取",
+      },
+    )
     if (streamError) throw streamError
 
     const jsonMatch = result.match(/```(?:json)?\s*([\s\S]*?)```/i)?.[1]?.match(/\{[\s\S]*\}/) ?? result.match(/\{[\s\S]*\}/)
@@ -1424,7 +1438,19 @@ ${body}
       onError: (error: Error) => { streamError = error },
     }
 
-    await streamChat(llmConfig, messages, callbacks, AbortSignal.timeout(180000))
+    await streamChat(
+      llmConfig,
+      messages,
+      callbacks,
+      AbortSignal.timeout(180000),
+      undefined,
+      {
+        projectPath: pp,
+        filePath: normalizedOutlinePath,
+        scope: "outline",
+        label: "大纲记忆提取",
+      },
+    )
     if (streamError) throw streamError
 
     const jsonMatch = result.match(/```(?:json)?\s*([\s\S]*?)```/i)?.[1]?.match(/\{[\s\S]*\}/) ?? result.match(/\{[\s\S]*\}/)

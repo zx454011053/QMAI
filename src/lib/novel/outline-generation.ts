@@ -218,19 +218,34 @@ async function streamOutlineSectionContent(
   context: string,
   config: OutlineSectionGenerationConfig,
   userRequest: string,
+  projectPath: string,
 ): Promise<string> {
   let content = ""
   let streamError: Error | null = null
+  const pp = normalizePath(projectPath)
+  const targetPath = `${pp}/wiki/outlines/${getOutlineSectionFileName(config)}`
 
-  await streamChat(llmConfig, [{ role: "user", content: buildSectionRefinementPrompt(context, config, userRequest) }], {
-    onToken: (token) => {
-      content += token
+  await streamChat(
+    llmConfig,
+    [{ role: "user", content: buildSectionRefinementPrompt(context, config, userRequest) }],
+    {
+      onToken: (token) => {
+        content += token
+      },
+      onDone: () => {},
+      onError: (err) => {
+        streamError = err
+      },
     },
-    onDone: () => {},
-    onError: (err) => {
-      streamError = err
+    undefined,
+    undefined,
+    {
+      projectPath: pp,
+      filePath: targetPath,
+      scope: "outline",
+      label: `细化生成：${getOutlineSectionTitle(config)}`,
     },
-  })
+  )
 
   if (streamError) throw streamError
   return content.trim()
@@ -308,7 +323,7 @@ export async function generateOutlineRefinementSectionFile(
 
   const outlinesDir = `${pp}/wiki/outlines`
   await createDirectory(outlinesDir)
-  const sectionContent = await streamOutlineSectionContent(llmConfig, context, config, userRequest)
+  const sectionContent = await streamOutlineSectionContent(llmConfig, context, config, userRequest, pp)
   const outlinePath = await writeOutlineSectionFile(pp, outlinesDir, config, sectionContent, writeOptions)
   if (!outlinePath) {
     throw new Error(i18n.t("novel.outlineGenerator.refineEmpty"))
@@ -336,7 +351,7 @@ export async function generateOutlineRefinementFiles(
   let primaryPath: string | null = null
 
   for (const config of OUTLINE_SECTION_GENERATION_CONFIGS) {
-    const sectionContent = await streamOutlineSectionContent(llmConfig, context, config, userRequest)
+    const sectionContent = await streamOutlineSectionContent(llmConfig, context, config, userRequest, pp)
     sections[config.key] = sectionContent
     const outlinePath = await writeOutlineSectionFile(pp, outlinesDir, config, sectionContent, writeOptions)
     if (!outlinePath) continue
@@ -369,6 +384,9 @@ export async function generateOutlineFile(
   let streamError: Error | null = null
 
   const messages: ChatMessage[] = [{ role: "user", content: prompt }]
+  const pp = normalizePath(projectPath)
+  const outlinesDir = `${pp}/wiki/outlines`
+  const outlinePath = `${outlinesDir}/${getStoryOutlineFileName()}`
 
   await streamChat(llmConfig, messages, {
     onToken: (token) => {
@@ -378,18 +396,20 @@ export async function generateOutlineFile(
     onError: (err) => {
       streamError = err
     },
+  }, undefined, undefined, {
+    projectPath: pp,
+    filePath: outlinePath,
+    scope: "outline",
+    label: "生成总大纲",
   })
 
   if (streamError) {
     throw streamError
   }
 
-  const pp = normalizePath(projectPath)
-  const outlinesDir = `${pp}/wiki/outlines`
   await createDirectory(outlinesDir)
   const outlineTitle = useEnglishOutlineNames() ? "Story Outline" : "总大纲"
   const fullContent = outlinePageMarkdown(outlineTitle, content)
-  const outlinePath = `${outlinesDir}/${getStoryOutlineFileName()}`
   await writeFile(outlinePath, fullContent)
   return { outlinePath, content }
 }

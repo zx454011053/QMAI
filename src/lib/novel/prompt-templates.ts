@@ -1,5 +1,20 @@
 import { buildLanguageDirective } from "@/lib/output-language"
 
+/** Per-volume chapter count guidance by novel word-count scale. */
+function volumeChapterRangeForScale(scale: string): string {
+  const s = scale.trim().toLowerCase()
+  if (!s) return "每卷 10-20 章"
+
+  if (s === "epic" || s.includes("200万") || s.includes("超长篇")) {
+    return "每卷 25-50 章"
+  }
+  if (s === "long" || s.includes("100万") || (s.includes("长篇") && !s.includes("超长篇"))) {
+    return "每卷 15-30 章"
+  }
+  // short / medium — 10万、50万字
+  return "每卷 10-20 章"
+}
+
 export const PROMPTS = {
   chapterGeneration: (contextPack: string, chapterGoal: string) =>
     [
@@ -55,12 +70,11 @@ export const PROMPTS = {
       "",
       "请输出以下内容：",
       "1. 总大纲（包含起承转合、主要冲突线、情感线）",
-      "2. 分卷大纲（根据规模合理分卷，每卷10-20章，标注每卷核心事件和转折点）",
+      `2. 分卷大纲（根据规模合理分卷，${volumeChapterRangeForScale(scale)}，标注每卷核心事件和转折点）`,
       "3. 主要人物设定（姓名、性格、动机、人物弧线、关键关系）",
       "4. 世界观设定（核心设定规则、势力分布、能力体系、重要地点）",
       "5. 伏笔计划（主要伏笔的埋设、推进、回收节点）",
     ].join("\n"),
-
   outlineRefinementGeneration: (outlineContext: string, sectionHints: string, userRequest: string) =>
     [
       "请基于已有大纲和项目记忆，对小说进行一次统一的细化生成。",

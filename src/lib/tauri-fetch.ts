@@ -11,27 +11,22 @@
  *  - Any enterprise / on-prem gateway that doesn't anticipate browser
  *    origins — a common shape across domestic Chinese clouds
  *
- * In unit tests (vitest / node), the plugin's browser-only globals
- * aren't available; `getHttpFetch` lazily imports and falls back to
- * `globalThis.fetch` so helper functions in this file can be imported
- * from any environment without crashing at module load.
+ * In unit tests (vitest / node) or plain browser dev servers, the
+ * plugin's Tauri-specific globals aren't available; `getHttpFetch`
+ * detects the environment and falls back to `globalThis.fetch` so
+ * helper functions in this file can be imported from any environment
+ * without crashing at module load or call time.
  */
+
+import { isTauri } from "@/lib/platform"
 
 let pluginFetchPromise: Promise<typeof globalThis.fetch> | null = null
 
 /**
- * True when running outside a browser / webview (vitest, SSR, any
- * Node-based tooling). The Tauri plugin is importable in Node
- * (resolution succeeds) but its internals reach for `window` at call
- * time, so we must avoid invoking it — guard BEFORE the dynamic
- * import rather than trying to .catch() an error that happens later.
- */
-const isNodeEnv = typeof window === "undefined"
-
-/**
  * Returns a fetch function that routes through Tauri's HTTP plugin in
  * production, falling back to the platform's native fetch in non-Tauri
- * environments (tests / SSR / storybook). Call this once per request:
+ * environments (tests / SSR / storybook / plain browser). Call this once
+ * per request:
  *
  *   const httpFetch = await getHttpFetch()
  *   const response = await httpFetch(url, opts)
@@ -40,12 +35,12 @@ const isNodeEnv = typeof window === "undefined"
  */
 export function getHttpFetch(): Promise<typeof globalThis.fetch> {
   if (!pluginFetchPromise) {
-    if (isNodeEnv) {
+    if (typeof window === "undefined" || !isTauri()) {
       // Bind so `this === globalThis` — Node's fetch requires it.
       pluginFetchPromise = Promise.resolve(globalThis.fetch.bind(globalThis))
     } else {
       pluginFetchPromise = import("@tauri-apps/plugin-http")
-        .then((m) => m.fetch as unknown as typeof globalThis.fetch)
+        .then((m) => (m?.fetch ?? globalThis.fetch) as unknown as typeof globalThis.fetch)
         .catch(() => globalThis.fetch.bind(globalThis))
     }
   }

@@ -78,8 +78,8 @@ export async function initAnalytics(): Promise<void> {
     cachedUUID = await getDeviceUUID()
 
     // 上报启动（在线）
-    await sendAnalytics("/open", cachedUUID)
-    await sendAnalytics("/heartbeat", cachedUUID)
+    // await sendAnalytics("/open", cachedUUID)
+    // await sendAnalytics("/heartbeat", cachedUUID)
 
     // 注册关闭事件
     if (typeof window !== "undefined") {

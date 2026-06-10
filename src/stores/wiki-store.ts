@@ -55,7 +55,7 @@ export interface ReasoningConfig {
 }
 
 interface LlmConfig {
-  provider: "openai" | "anthropic" | "google" | "ollama" | "custom" | "minimax" | "claude-code" | "codex-cli"
+  provider: "openai" | "anthropic" | "google" | "ollama" | "custom" | "minimax" | "claude-code" | "codex-cli" | "deepseek"
   apiKey: string
   model: string
   ollamaUrl: string
@@ -63,6 +63,8 @@ interface LlmConfig {
   maxContextSize: number // max context window in characters
   apiMode?: CustomApiMode
   reasoning?: ReasoningConfig
+  /** Show cache hit rate indicator for DeepSeek provider */
+  showCacheHitRate?: boolean
 }
 
 export type SearchProvider = "tavily" | "serpapi" | "searxng" | "none"
@@ -309,6 +311,8 @@ export interface ProviderOverride {
   apiMode?: CustomApiMode
   maxContextSize?: number
   reasoning?: ReasoningConfig
+  /** Show cache hit rate indicator for DeepSeek provider */
+  showCacheHitRate?: boolean
 }
 
 export type ProviderConfigs = Record<string, ProviderOverride>

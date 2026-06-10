@@ -100,7 +100,7 @@ export function IconSidebar({ onToggleSidebar, onOpenSidebar, onSwitchProject }:
         if (llmConfig.provider === "ollama") {
           const base = (llmConfig.ollamaUrl || "http://127.0.0.1:11434").replace(/\/+$/, "")
           modelsUrl = `${base}/api/tags`
-        } else if (llmConfig.provider === "custom" || llmConfig.provider === "minimax") {
+        } else if (llmConfig.provider === "custom" || llmConfig.provider === "minimax" || llmConfig.provider === "deepseek") {
           // customEndpoint 可能是 "/v1" 或 "/v1/chat/completions"，去掉 /chat/completions 保留 /v1
           const base = (llmConfig.customEndpoint || "").replace(/\/+$/, "").replace(/\/chat\/completions$/i, "")
           if (!base) { setModelStatus("disconnected"); return }

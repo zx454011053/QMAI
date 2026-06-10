@@ -15,6 +15,13 @@ export interface MessageReference {
   path: string
 }
 
+export interface UsageInfo {
+  promptTokens?: number
+  completionTokens?: number
+  promptCacheHitTokens?: number
+  promptCacheMissTokens?: number
+}
+
 export interface DisplayMessage {
   id: string
   role: "user" | "assistant" | "system"
@@ -23,6 +30,7 @@ export interface DisplayMessage {
   conversationId: string
   references?: MessageReference[]  // pages cited in this response, saved at creation time
   discarded?: boolean
+  usage?: UsageInfo
 }
 
 interface ChatState {
@@ -48,7 +56,7 @@ interface ChatState {
   setConversations: (conversations: Conversation[]) => void
   setStreaming: (streaming: boolean) => void
   appendStreamToken: (token: string) => void
-  finalizeStream: (content: string, references?: MessageReference[]) => void
+  finalizeStream: (content: string, references?: MessageReference[], usage?: UsageInfo) => void
   setMode: (mode: ChatState["mode"]) => void
   setIngestSource: (path: string | null) => void
   clearMessages: () => void
@@ -175,7 +183,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       streamingContent: state.streamingContent + token,
     })),
 
-  finalizeStream: (content, references) =>
+  finalizeStream: (content, references, usage) =>
     set((state) => {
       const { activeConversationId, conversations } = state
       if (!activeConversationId) {
@@ -192,6 +200,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         timestamp: Date.now(),
         conversationId: activeConversationId,
         references,
+        usage,
       }
 
       return {

@@ -1,13 +1,6 @@
-/**
- * 中文小说去AI味规则（整合 Stop Slop + AI Flavor Remover + 中文小说特性）
- *
- * 参考资源：
- * - Stop Slop: https://github.com/drm-collab/stop-slop
- * - AI Flavor Remover: https://github.com/hylarucoder/ai-flavor-remover
- * - Writing Humanizer: https://github.com/shyuan/writing-humanizer
- */
+# 中文小说去AI味专业规则
 
-export const CHINESE_NOVEL_DE_AI_RULES = `# 中文小说去AI味专业规则
+整合 Stop Slop + AI Flavor Remover + Writing Humanizer
 
 ## 一、AI味识别清单（必须消除）
 
@@ -124,4 +117,11 @@ export const CHINESE_NOVEL_DE_AI_RULES = `# 中文小说去AI味专业规则
 
 ---
 
-**核心理念**：好的去AI味是让文字为故事服务。删掉一切不推进故事、不塑造人物、不制造氛围的东西。`
+**核心理念**：好的去AI味是让文字为故事服务。删掉一切不推进故事、不塑造人物、不制造氛围的东西。
+
+---
+
+**参考资源**：
+- Stop Slop: https://github.com/drm-collab/stop-slop
+- AI Flavor Remover: https://github.com/hylarucoder/ai-flavor-remover
+- Writing Humanizer: https://github.com/shyuan/writing-humanizer

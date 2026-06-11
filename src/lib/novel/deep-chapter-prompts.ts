@@ -150,7 +150,9 @@ export function buildDeepChapterFinalPolishPrompt(
   userRequest: string,
   chapterNumber?: number,
   goldenThreeChapter?: GoldenThreeChapterRequest,
+  customDeAiSkill?: string,
 ): string {
+  const deAiRules = customDeAiSkill && customDeAiSkill.trim() ? customDeAiSkill.trim() : CHINESE_NOVEL_DE_AI_RULES
   return [
     "你是小说正文最终质检与去AI味助手。",
     "请对二次审查/返修后的章节做最后一遍简单审查，并进行去AI味处理。",
@@ -163,7 +165,7 @@ export function buildDeepChapterFinalPolishPrompt(
     "5. 不再强制压缩到固定字数区间；只做必要的自然化、顺滑化和轻量修补，禁止为了凑字数复读。",
     "6. 只输出最终可保存的小说正文，不要输出审查报告、解释、标题或修改说明。",
     "",
-    CHINESE_NOVEL_DE_AI_RULES,
+    deAiRules,
     "",
     chapterNumber ? `目标章节：第${chapterNumber}章` : "目标章节：用户请求中的章节",
     `用户请求：${userRequest}`,

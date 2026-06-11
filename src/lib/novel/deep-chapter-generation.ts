@@ -151,6 +151,33 @@ export async function runDeepChapterGeneration(
   assertNotAborted(signal)
   const resumeCheckpoint = input.resumeCheckpoint
   const writingConfig = resolveWritingConfig(input.llmConfig)
+  const { loadCustomDeAiSkill } = await import("./de-ai-adapter")
+  const customDeAiSkill = await loadCustomDeAiSkill(input.projectPath)
+
+  // 阶段0：前情分析（仅当章节号>1时）
+  let previousChaptersAnalysis = ""
+  if (input.chapterNumber && input.chapterNumber > 1 && !resumeCheckpoint) {
+    callbacks.onThinking?.(formatStageThinking("阶段0：前情分析", "正在读取并分析前3章完整内容..."))
+    const { analyzePreviousChapters } = await import("./previous-chapters-analysis")
+    try {
+      previousChaptersAnalysis = await analyzePreviousChapters(
+        input.projectPath,
+        input.chapterNumber,
+        writingConfig,
+        3,
+      )
+      if (previousChaptersAnalysis) {
+        callbacks.onThinking?.(formatStageThinking(
+          "阶段0：前情分析",
+          `已完成前情分析（${previousChaptersAnalysis.length}字）\n\n${previousChaptersAnalysis.slice(0, 500)}...`
+        ))
+      }
+    } catch (error) {
+      console.error("[deep-chapter-generation] 前情分析失败:", error)
+    }
+  }
+  assertNotAborted(signal)
+
   const contextPack = await safeBuildChapterContextPack(
     deps,
     input.projectPath,
@@ -159,6 +186,7 @@ export async function runDeepChapterGeneration(
   )
   assertNotAborted(signal)
   const contextPrompt = [
+    previousChaptersAnalysis ? `## 前情分析\n\n${previousChaptersAnalysis}` : "",
     deps.contextPackToPrompt(contextPack),
     input.dismantlingReferenceDirective,
   ].filter(Boolean).join("\n\n")
@@ -322,6 +350,7 @@ export async function runDeepChapterGeneration(
     callbacks,
     deps,
     signal,
+    customDeAiSkill || undefined,
   )
   callbacks.onThinking?.(formatStageThinking(
     "阶段7：完成",
@@ -348,6 +377,7 @@ async function finalPolishChapter(
   callbacks: DeepChapterGenerationCallbacks,
   deps: DeepChapterGenerationDeps,
   signal?: AbortSignal,
+  customDeAiSkill?: string,
 ): Promise<string> {
   assertNotAborted(signal)
   callbacks.onThinking?.(formatStageThinking("阶段6：简单审查与去AI味", "正在进行最后一遍简单审查，去除复读、机械套话和 AI 味。"))
@@ -362,6 +392,7 @@ async function finalPolishChapter(
         input.userRequest,
         input.chapterNumber,
         input.goldenThreeChapter,
+        customDeAiSkill,
       ),
     }],
     deps,

@@ -1,4 +1,6 @@
 import type { ChatMessage } from "@/lib/llm-providers"
+import { readFile } from "@/commands/fs"
+import { join } from "@tauri-apps/api/path"
 import qmQuaiSkillMarkdown from "../../../QM-QUAI.md?raw"
 import { CHINESE_NOVEL_DE_AI_RULES } from "./de-ai-rules"
 
@@ -8,18 +10,33 @@ const QM_QUAI_SYSTEM_PROMPT = [
   CHINESE_NOVEL_DE_AI_RULES,
 ].join("\n")
 
-export function buildQmQuaiSystemPrompt(): string {
+export async function loadCustomDeAiSkill(projectPath?: string | null): Promise<string | null> {
+  if (!projectPath) return null
+  try {
+    const skillPath = await join(projectPath, "de-ai-skill.txt")
+    const content = await readFile(skillPath)
+    const trimmed = content.trim()
+    return trimmed || null
+  } catch {
+    return null
+  }
+}
+
+export function buildQmQuaiSystemPrompt(customSkill?: string): string {
+  if (customSkill && customSkill.trim()) {
+    return customSkill.trim()
+  }
   return QM_QUAI_SYSTEM_PROMPT
 }
 
-export function buildDeAiSystemPrompt(): string {
-  return buildQmQuaiSystemPrompt()
+export function buildDeAiSystemPrompt(customSkill?: string): string {
+  return buildQmQuaiSystemPrompt(customSkill)
 }
 
-export function buildQmQuaiRewriteMessages(content: string): ChatMessage[] {
+export function buildQmQuaiRewriteMessages(content: string, customSkill?: string): ChatMessage[] {
   if (!content.trim()) throw new Error("去AI味内容为空，无法处理")
   return [
-    { role: "system", content: buildQmQuaiSystemPrompt() },
+    { role: "system", content: buildQmQuaiSystemPrompt(customSkill) },
     {
       role: "user",
       content: "请严格按照 QM-QUAI skill 规则处理下面正文。\n\n输出仅返回改写后的正文，不要解释。\n\n正文如下：\n\n" + content,
@@ -27,8 +44,8 @@ export function buildQmQuaiRewriteMessages(content: string): ChatMessage[] {
   ]
 }
 
-export function buildDeAiRewriteMessages(content: string): ChatMessage[] {
-  return buildQmQuaiRewriteMessages(content)
+export function buildDeAiRewriteMessages(content: string, customSkill?: string): ChatMessage[] {
+  return buildQmQuaiRewriteMessages(content, customSkill)
 }
 
 const DIRECTIVE_PREFIX = [

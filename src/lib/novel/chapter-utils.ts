@@ -20,7 +20,14 @@ export function flattenMdFiles(nodes: Array<{ name: string; path: string; is_dir
       out.push({ name: node.name, path: node.path })
     }
   }
-  return out
+  return out.sort((a, b) => {
+    const aNum = extractChapterNumber(a.name)
+    const bNum = extractChapterNumber(b.name)
+    if (aNum !== null && bNum !== null && aNum !== bNum) return aNum - bNum
+    if (aNum !== null && bNum === null) return -1
+    if (aNum === null && bNum !== null) return 1
+    return a.name.localeCompare(b.name, "zh-Hans-CN", { numeric: true })
+  })
 }
 
 export async function getNextChapterNumber(projectPath: string): Promise<number> {

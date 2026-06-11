@@ -7,6 +7,10 @@ import { useChatStore } from "@/stores/chat-store"
 import { listDirectory, openProject, fileExists } from "@/commands/fs"
 import { getLastProject, getRecentProjects, saveLastProject, loadLlmConfig, loadLanguage, loadEmbeddingConfig, loadProviderConfigs, loadActivePresetId, loadProxyConfig, loadClipServerConfig, loadScheduledImportConfig, saveScheduledImportConfig, loadSourceWatchConfig, loadNovelMode, loadNovelConfig, loadRevisionFeedbackWindowConfig, loadTheme, saveLlmConfig } from "@/lib/project-store"
 import { loadNovelProjectMeta } from "@/lib/novel/project-meta"
+import { loadProjectPromptConfig } from "@/lib/novel/prompt-config-storage"
+import { loadLlmUsageRecords } from "@/lib/llm-usage-storage"
+import { useLlmUsageStore } from "@/stores/llm-usage-store"
+import { usePromptConfigStore } from "@/stores/prompt-config-store"
 import { loadReviewItems, loadChatHistory } from "@/lib/persist"
 import { setupAutoSave } from "@/lib/auto-save"
 import { startClipWatcher } from "@/lib/clip-watcher"
@@ -136,7 +140,7 @@ function App() {
     if (isTauri()) {
       await resetProjectState()
     } else {
-      resetProjectStores()
+      await resetProjectStores()
     }
 
     setProject(proj)
@@ -153,6 +157,10 @@ function App() {
     if (projectNovelConfig) {
       useWikiStore.getState().setNovelConfig(projectNovelConfig)
     }
+    const promptConfig = await loadProjectPromptConfig(proj.path)
+    usePromptConfigStore.getState().loadForProject(proj.path, promptConfig)
+    const llmUsageRecords = await loadLlmUsageRecords(proj.path)
+    useLlmUsageStore.getState().hydrateForProject(proj.path, llmUsageRecords)
     const projectRevisionFeedbackWindowConfig = await loadRevisionFeedbackWindowConfig(proj.id, proj.path)
     useWikiStore.getState().setRevisionFeedbackWindowConfig(projectRevisionFeedbackWindowConfig)
     setSelectedFile(null)

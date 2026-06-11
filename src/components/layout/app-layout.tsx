@@ -90,6 +90,7 @@ export function AppLayout({ onSwitchProject }: AppLayoutProps) {
   // cramped. Hide both the left sidebar (and the file preview on the
   // right) so the settings screen uses the whole content area.
   const isSettings = activeView === "settings"
+  const hideFileSidebar = isSettings || activeView === "generationHistory"
   // Novel mode keeps the writing editor inside the chapter workspace only.
   // Outline/search/graph views no longer mount a secondary preview panel.
 
@@ -205,7 +206,7 @@ export function AppLayout({ onSwitchProject }: AppLayoutProps) {
           onSwitchProject={onSwitchProject}
         />
         <div ref={containerRef} className="flex min-w-0 flex-1 overflow-hidden">
-        {!isSettings && !sidebarCollapsed && (
+        {!hideFileSidebar && !sidebarCollapsed && (
           <>
             <div
               className="flex shrink-0 flex-col overflow-hidden border-r"

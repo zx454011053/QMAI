@@ -16,6 +16,8 @@ export interface LlmUsageRecord {
   model: string
   provider: string
   messages: LlmUsageMessage[]
+  response?: string
+  filePath?: string
   usage?: UsageData
   error?: string
   durationMs?: number
@@ -23,15 +25,68 @@ export interface LlmUsageRecord {
 
 export interface LlmUsageTracking {
   projectPath: string
-  filePath: string
-  scope: LlmUsageScope
   label: string
+  filePath?: string
+  /** @deprecated Kept for call-site compatibility; not used for storage. */
+  scope?: LlmUsageScope
 }
 
 const MAX_RECORDS_PER_SCOPE = 200
 
 export function makeLlmUsageScopeKey(projectPath: string, filePath: string): string {
   return `${normalizePath(projectPath)}::${normalizePath(filePath)}`
+}
+
+const PROJECT_HISTORY_SCOPE_SUFFIX = "__generation_history__"
+
+export function makeProjectHistoryScopeKey(projectPath: string): string {
+  return `${normalizePath(projectPath)}::${PROJECT_HISTORY_SCOPE_SUFFIX}`
+}
+
+function findProjectHistoryScopeKey(
+  recordsByScope: Record<string, LlmUsageRecord[]>,
+  projectPath: string,
+): string | null {
+  const exactKey = makeProjectHistoryScopeKey(projectPath)
+  if (recordsByScope[exactKey]) return exactKey
+
+  const suffix = `::${PROJECT_HISTORY_SCOPE_SUFFIX}`
+  for (const key of Object.keys(recordsByScope)) {
+    if (key.endsWith(suffix)) return key
+  }
+  return null
+}
+
+export function getProjectHistoryScopeKey(
+  recordsByScope: Record<string, LlmUsageRecord[]>,
+  projectPath: string,
+): string {
+  return findProjectHistoryScopeKey(recordsByScope, projectPath) ?? makeProjectHistoryScopeKey(projectPath)
+}
+
+export function getProjectHistoryRecords(
+  recordsByScope: Record<string, LlmUsageRecord[]>,
+  projectPath: string,
+): LlmUsageRecord[] {
+  const scopeKey = findProjectHistoryScopeKey(recordsByScope, projectPath)
+  return scopeKey ? recordsByScope[scopeKey] ?? [] : []
+}
+
+export function remapProjectUsageScopeKeys(
+  recordsByScope: Record<string, LlmUsageRecord[]>,
+  projectPath: string,
+): Record<string, LlmUsageRecord[]> {
+  const pp = normalizePath(projectPath)
+  const remapped: Record<string, LlmUsageRecord[]> = {}
+
+  for (const [scopeKey, records] of Object.entries(recordsByScope)) {
+    const separator = scopeKey.indexOf("::")
+    if (separator < 0) continue
+    const scopePart = scopeKey.slice(separator + 2)
+    remapped[`${pp}::${scopePart}`] = records
+  }
+
+  return remapped
 }
 
 export function serializeMessageContent(content: string | ContentBlock[]): string {
@@ -72,6 +127,18 @@ export function inferLlmUsageScope(filePath: string): LlmUsageScope | null {
   if (normalized.includes("/wiki/chapters/")) return "chapter"
   if (normalized.includes("/wiki/outlines/")) return "outline"
   return null
+}
+
+export function buildLlmUsageTracking(
+  projectPath: string,
+  label: string,
+  filePath?: string,
+): LlmUsageTracking {
+  return {
+    projectPath,
+    label,
+    filePath,
+  }
 }
 
 export function buildLlmUsageTrackingFromFile(

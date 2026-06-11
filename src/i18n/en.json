@@ -183,6 +183,8 @@
   "nav": {
     "wiki": "Knowledge Base",
     "sources": "Sources",
+    "promptConfig": "Prompts",
+    "generationHistory": "Generation History",
     "search": "Search",
     "graph": "Graph",
     "chat": "Chat",
@@ -192,6 +194,15 @@
     "settings": "Settings",
     "switchProject": "Switch Project",
     "trash": "Trash"
+  },
+  "generationHistory": {
+    "title": "Generation History",
+    "subtitle": "All AI generation records for this project",
+    "empty": "No generation records yet",
+    "clear": "Clear history",
+    "failed": "Failed",
+    "selectHint": "Select a record on the left to view details",
+    "detailSubtitle": "Request details, prompts, and responses"
   },
   "theme": {
     "switch": "Switch theme",
@@ -973,6 +984,8 @@
     "nav": {
       "wiki": "章节库",
       "sources": "大纲库",
+      "promptConfig": "Prompts",
+      "generationHistory": "Generation History",
       "search": "剧情搜索",
       "graph": "小说图谱",
       "chat": "写作对话",

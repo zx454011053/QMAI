@@ -390,9 +390,10 @@ interface WikiState {
    */
   pendingScrollImageSrc: string | null
   selectedMemoryCenterEntry: string | null
+  selectedGenerationHistoryId: string | null
   chatExpanded: boolean
   searchPanelOpen: boolean
-  activeView: "wiki" | "sources" | "search" | "graph" | "lint" | "soul" | "settings" | "trash" | "reviewCenter"
+  activeView: "wiki" | "sources" | "promptConfig" | "generationHistory" | "search" | "graph" | "lint" | "soul" | "settings" | "trash" | "reviewCenter"
   activeSettingsCategory: "usage-guide" | null
   selectedSoulId: string | null
   selectedSoulTab: "project" | "character"
@@ -443,6 +444,7 @@ interface WikiState {
   setPendingEditorHighlight: (highlight: PendingEditorHighlight | null) => void
   setPendingScrollImageSrc: (src: string | null) => void
   setSelectedMemoryCenterEntry: (entry: string | null) => void
+  setSelectedGenerationHistoryId: (id: string | null) => void
   setChatExpanded: (expanded: boolean) => void
   setSearchPanelOpen: (open: boolean) => void
   setActiveView: (view: WikiState["activeView"]) => void
@@ -499,6 +501,7 @@ export const useWikiStore = create<WikiState>((set) => ({
   pendingEditorHighlight: null,
   pendingScrollImageSrc: null,
   selectedMemoryCenterEntry: null,
+  selectedGenerationHistoryId: null,
   chatExpanded: false,
   searchPanelOpen: false,
   activeView: "wiki",
@@ -533,7 +536,7 @@ export const useWikiStore = create<WikiState>((set) => ({
 
   dataVersion: 0,
 
-  setProject: (project) => set({ project }),
+  setProject: (project) => set({ project, selectedGenerationHistoryId: null }),
   setFileTree: (fileTree) => set({ fileTree }),
   setSelectedFile: (selectedFile) => set({ selectedFile, selectedTrashItem: null }),
   setSelectedTrashItem: (selectedTrashItem) => set({ selectedTrashItem, selectedFile: null }),
@@ -541,6 +544,7 @@ export const useWikiStore = create<WikiState>((set) => ({
   setPendingEditorHighlight: (pendingEditorHighlight) => set({ pendingEditorHighlight }),
   setPendingScrollImageSrc: (pendingScrollImageSrc) => set({ pendingScrollImageSrc }),
   setSelectedMemoryCenterEntry: (selectedMemoryCenterEntry) => set({ selectedMemoryCenterEntry }),
+  setSelectedGenerationHistoryId: (selectedGenerationHistoryId) => set({ selectedGenerationHistoryId }),
   setChatExpanded: (chatExpanded) => set({ chatExpanded }),
   setSearchPanelOpen: (searchPanelOpen) => set({ searchPanelOpen }),
   setActiveView: (activeView) => set({ activeView }),

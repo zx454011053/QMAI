@@ -4,6 +4,7 @@ import { getHttpFetch, isFetchNetworkError } from "./tauri-fetch"
 import { countReasoningCharsInLine, extractReasoningTextFromLine } from "./reasoning-detector"
 import {
   makeLlmUsageScopeKey,
+  makeProjectHistoryScopeKey,
   serializeMessageContent,
   type LlmUsageTracking,
 } from "./llm-usage"
@@ -38,26 +39,44 @@ function wrapStreamChatCallbacks(
 
   const startedAt = Date.now()
   let capturedUsage: UsageData | undefined
-  const scopeKey = makeLlmUsageScopeKey(usageTracking.projectPath, usageTracking.filePath)
+  let responseText = ""
+  const projectHistoryKey = makeProjectHistoryScopeKey(usageTracking.projectPath)
+  const fileScopeKey = usageTracking.filePath
+    ? makeLlmUsageScopeKey(usageTracking.projectPath, usageTracking.filePath)
+    : null
   const serializedMessages = messages.map((message) => ({
     role: message.role,
     content: serializeMessageContent(message.content),
   }))
 
   const persistRecord = (error?: string) => {
-    useLlmUsageStore.getState().addRecord(scopeKey, {
+    const record = {
       label: usageTracking.label,
       model: config.model,
       provider: config.provider,
       messages: serializedMessages,
+      response: responseText || undefined,
+      filePath: usageTracking.filePath,
       usage: capturedUsage,
       error,
       durationMs: Date.now() - startedAt,
-    })
+    }
+    useLlmUsageStore.getState().addRecord(projectHistoryKey, record)
+    if (fileScopeKey) {
+      useLlmUsageStore.getState().addRecord(fileScopeKey, record)
+    }
   }
 
   return {
     ...callbacks,
+    onToken: (token) => {
+      responseText += token
+      callbacks.onToken(token)
+    },
+    onReasoningToken: (token) => {
+      responseText += token
+      callbacks.onReasoningToken?.(token)
+    },
     onUsage: (usage) => {
       capturedUsage = usage
       callbacks.onUsage?.(usage)

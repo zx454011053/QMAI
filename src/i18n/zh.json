@@ -70,6 +70,8 @@
   "nav": {
     "wiki": "章节库",
     "sources": "原始资料",
+    "promptConfig": "提示词",
+    "generationHistory": "生成历史",
     "search": "搜索",
     "graph": "关系图",
     "lint": "检查",
@@ -78,6 +80,15 @@
     "settings": "设置",
     "switchProject": "切换小说",
     "trash": "回收站"
+  },
+  "generationHistory": {
+    "title": "生成历史",
+    "subtitle": "本项目所有 AI 生成记录",
+    "empty": "暂无生成记录",
+    "clear": "清空历史",
+    "failed": "失败",
+    "selectHint": "从左侧选择一条记录查看详情",
+    "detailSubtitle": "请求详情、提示词与返回内容"
   },
   "theme": {
     "switch": "切换主题",
@@ -849,6 +860,8 @@
     "nav": {
       "wiki": "章节库",
       "sources": "大纲",
+      "promptConfig": "提示词",
+      "generationHistory": "生成历史",
       "search": "剧情搜索",
       "graph": "小说图谱",
       "lint": "记忆中心",

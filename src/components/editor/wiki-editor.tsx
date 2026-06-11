@@ -27,6 +27,7 @@ interface WikiEditorInnerProps {
 
 interface WritingTextareaProps {
   content: string
+  contentEpoch: number
   onSave: (markdown: string) => void
   autoFocus?: boolean
   onSelectionAction?: (action: ChapterSelectionAction, selection: ChapterBodySelection) => void
@@ -41,24 +42,25 @@ interface FloatingToolbarPosition {
 
 function WritingTextarea({
   content,
+  contentEpoch,
   onSave,
   autoFocus = false,
   onSelectionAction,
   highlightRequest,
   onHighlightHandled,
 }: WritingTextareaProps) {
-  const initial = useMemo(() => splitChapterHeading(content), [content])
-  const [heading, setHeading] = useState(initial.heading)
-  const [value, setValue] = useState(initial.body)
+  const initialSplit = splitChapterHeading(content)
+  const [heading, setHeading] = useState(initialSplit.heading)
+  const [value, setValue] = useState(initialSplit.body)
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
-  const previousBodyRef = useRef(initial.body)
   const [selection, setSelection] = useState<ChapterBodySelection | null>(null)
   const [toolbarPosition, setToolbarPosition] = useState<FloatingToolbarPosition | null>(null)
+  const contentEpochRef = useRef(contentEpoch)
 
   useEffect(() => {
+    if (contentEpochRef.current === contentEpoch) return
+    contentEpochRef.current = contentEpoch
     const { heading: h, body: b } = splitChapterHeading(content)
-    const previousBody = previousBodyRef.current
-    previousBodyRef.current = b
     setHeading(h)
     setValue(b)
     setSelection(null)
@@ -67,32 +69,15 @@ function WritingTextarea({
     requestAnimationFrame(() => {
       const el = textareaRef.current
       if (!el) return
-      const shouldMoveCaretToEnd = document.activeElement !== el || (previousBody.length === 0 && b.length > 0)
       el.focus()
-      if (shouldMoveCaretToEnd) {
-        const caret = el.value.length
-        el.setSelectionRange(caret, caret)
-      }
+      const caret = el.value.length
+      el.setSelectionRange(caret, caret)
     })
-  }, [content, autoFocus])
+  }, [content, contentEpoch, autoFocus])
 
   const rebuild = useCallback((h: string, b: string) => {
     onSave(h ? `# ${h}\n\n${b}` : b)
   }, [onSave])
-
-  const resize = useMemo(
-    () => () => {
-      const el = textareaRef.current
-      if (!el) return
-      el.style.height = "auto"
-      el.style.height = `${el.scrollHeight}px`
-    },
-    [],
-  )
-
-  useEffect(() => {
-    resize()
-  }, [value, resize])
 
   const refreshSelection = useCallback(() => {
     const el = textareaRef.current
@@ -231,15 +216,10 @@ function WritingTextarea({
             const caret = start + 3
             target.selectionStart = caret
             target.selectionEnd = caret
-            resize()
           })
         }}
-        className="w-full resize-none border-0 bg-transparent p-0 text-lg leading-8 text-foreground outline-none"
-        style={{ 
-          fontFamily: "inherit",
-          minHeight: "100%",
-          height: "auto"
-        }}
+        className="chapter-writing-textarea block w-full resize-none overflow-y-auto border-0 bg-transparent p-0 text-lg leading-8 text-foreground outline-none"
+        style={{ fontFamily: "inherit", minHeight: "calc(100vh - 16rem)" }}
         spellCheck={false}
       />
     </div>
@@ -283,6 +263,7 @@ function WikiEditorInner({ content, onSave }: WikiEditorInnerProps) {
 
 interface WikiEditorProps {
   content: string
+  contentEpoch?: number
   onSave: (markdown: string) => void
   defaultMode?: "read" | "edit"
   immersiveWriting?: boolean
@@ -300,6 +281,7 @@ function wrapBareMathBlocks(text: string): string {
 
 export function WikiEditor({
   content,
+  contentEpoch = 0,
   onSave,
   defaultMode = "read",
   immersiveWriting = false,
@@ -365,10 +347,13 @@ export function WikiEditor({
         </div>
       ) : (
         immersiveWriting ? (
-          <div className="immersive-scroll-container flex h-full w-full flex-col overflow-auto" style={{ 
-            scrollbarWidth: "thin",
-            scrollbarColor: "oklch(0.75 0 0) transparent"
-          }}>
+          <div
+            className="immersive-scroll-container flex h-full w-full flex-col overflow-auto"
+            style={{
+              scrollbarWidth: "thin",
+              scrollbarColor: "oklch(0.75 0 0) transparent",
+            }}
+          >
             <style>{`
               .immersive-scroll-container::-webkit-scrollbar {
                 width: 8px;
@@ -384,15 +369,18 @@ export function WikiEditor({
                 background: oklch(0.65 0 0);
               }
             `}</style>
-            <div className="mx-auto w-full max-w-4xl flex-col px-8 py-10">
-              <WritingTextarea
-                content={body}
-                onSave={handleSave}
-                autoFocus={immersiveWriting}
-                onSelectionAction={onSelectionAction}
-                highlightRequest={highlightRequest}
-                onHighlightHandled={onHighlightHandled}
-              />
+            <div className="mx-auto w-full max-w-4xl px-8 py-10">
+              <div className="chapter-editable-surface rounded-lg border border-border/70 bg-background px-6 py-8 shadow-sm">
+                <WritingTextarea
+                  content={body}
+                  contentEpoch={contentEpoch}
+                  onSave={handleSave}
+                  autoFocus={immersiveWriting}
+                  onSelectionAction={onSelectionAction}
+                  highlightRequest={highlightRequest}
+                  onHighlightHandled={onHighlightHandled}
+                />
+              </div>
             </div>
           </div>
         ) : (

@@ -14,6 +14,7 @@ import {
   makeLlmUsageScopeKey,
   type LlmUsageRecord,
 } from "@/lib/llm-usage"
+import { AssistantResponseContent } from "@/components/llm/assistant-response-content"
 import { useLlmUsageStore } from "@/stores/llm-usage-store"
 
 interface LlmUsageDialogProps {
@@ -87,6 +88,14 @@ function UsageRecordRow({ record }: { record: LlmUsageRecord }) {
               </pre>
             </div>
           ))}
+          {record.response ? (
+            <div className="rounded border border-border/50 bg-background/80">
+              <div className="border-b border-border/40 px-2 py-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                assistant
+              </div>
+              <AssistantResponseContent content={record.response} className="space-y-2 px-2 py-2" />
+            </div>
+          ) : null}
         </div>
       ) : null}
     </div>

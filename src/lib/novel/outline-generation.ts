@@ -192,25 +192,12 @@ function buildSectionRefinementPrompt(
   config: OutlineSectionGenerationConfig,
   userRequest: string,
 ): string {
-  const sectionTitle = getOutlineSectionTitle(config)
-  return [
-    "请基于已有大纲和项目记忆，生成指定类型的小说设定文件。",
-    "",
-    "硬性约束：",
-    "1. 已有大纲、人物状态、角色认知、伏笔状态、时间线、正史规则和项目记忆都是最高优先级，不得推翻。",
-    "2. 本次用户要求只能用于补充、聚焦和完善，不得改写既定主线和核心设定。",
-    "3. 如果信息不足，只能做最小必要补完，且必须与现有设定兼容。",
-    "4. 只输出正文 Markdown，不要输出 JSON、代码块、解释、前言或额外说明。",
-    "",
-    "已有大纲与项目记忆：",
-    context || "当前暂无可读取的项目记忆，请仅基于已有大纲与本次要求进行细化。",
-    "",
-    "本次细化重点：",
-    userRequest.trim() || "未额外指定，请基于已有大纲与项目记忆完成细化。",
-    "",
-    `本次只生成：${sectionTitle}`,
+  return PROMPTS.outlineSectionRefinement(
+    context,
+    userRequest,
+    getOutlineSectionTitle(config),
     config.requestHint,
-  ].join("\n")
+  )
 }
 
 async function streamOutlineSectionContent(

@@ -13,6 +13,7 @@ import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
 import { useWikiStore } from "@/stores/wiki-store"
 import { streamChat } from "@/lib/llm-client"
+import { buildLlmUsageTracking } from "@/lib/llm-usage"
 import { writeFile, listDirectory, createDirectory } from "@/commands/fs"
 import { PROMPTS } from "@/lib/novel/prompt-templates"
 import { normalizePath } from "@/lib/path-utils"
@@ -81,6 +82,8 @@ export function OutlineCreatorDialog({
       if (useAi) {
         const outlineTypeLabel = t(`novel.outline.type.${outlineType}`)
         const prompt = PROMPTS.outlineGeneration(outlineTypeLabel, "", premise)
+        const pp = normalizePath(project.path)
+        const usageTracking = buildLlmUsageTracking(pp, `新建大纲：${outlineTypeLabel}`, `${pp}/wiki/outlines/_new`)
 
         const errorRef = { current: null as Error | null }
         await streamChat(llmConfig, [{ role: "user", content: prompt }], {
@@ -91,7 +94,7 @@ export function OutlineCreatorDialog({
           onError: (err) => {
             errorRef.current = err
           },
-        })
+        }, undefined, undefined, usageTracking)
 
         if (errorRef.current) {
           setError(errorRef.current.message)

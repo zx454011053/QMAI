@@ -17,6 +17,7 @@ import { TrashPanel } from "./trash-panel"
 import { GraphSidebarPanel } from "./graph-sidebar-panel"
 import { SoulSidebarPanel } from "./soul-sidebar-panel"
 import { ReviewCenterSidebarPanel } from "./review-center-sidebar-panel"
+import { PromptConfigListPanel } from "./prompt-config-list-panel"
 import { useWikiStore } from "@/stores/wiki-store"
 import { createDirectory, fileExists, listDirectory, readFile, writeFile } from "@/commands/fs"
 import { countChapterBodyWords } from "@/lib/chapter-word-count"
@@ -551,6 +552,10 @@ export function SidebarPanel() {
 
   if (activeView === "trash") {
     return <TrashPanel />
+  }
+
+  if (activeView === "promptConfig" && novelMode) {
+    return <PromptConfigListPanel />
   }
 
   if (activeView === "lint" && novelMode) {

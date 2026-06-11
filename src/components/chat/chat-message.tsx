@@ -22,6 +22,10 @@ import { findRawSourceForImage, imageUrlToAbsolute } from "@/lib/raw-source-reso
 import { detectLanguage } from "@/lib/detect-language"
 import { getHtmlLang, getTextDirection } from "@/lib/language-metadata"
 import { MermaidDiagram, unwrapMermaidPre } from "@/components/mermaid-diagram"
+import { parseAgentResponse } from "@/lib/novel/agent-parser"
+import { separateThinking, stripThinkingBlocks } from "@/lib/thinking-content"
+import { ThinkingBlock } from "@/components/llm/thinking-block"
+import type { FileEditAction } from "@/lib/novel/agent-parser"
 
 interface ChatMessageProps {
   message: DisplayMessage
@@ -122,11 +126,7 @@ function CopyButton({ content }: { content: string }) {
 
   const handleCopy = useCallback(async () => {
     // Strip HTML comments and thinking blocks before copying
-    const clean = content
-      .replace(/<!--.*?-->/gs, "")
-      .replace(/<think(?:ing)?>\s*[\s\S]*?<\/think(?:ing)?>\s*/gi, "")
-      .replace(/<think(?:ing)?>\s*[\s\S]*$/gi, "")
-      .trim()
+    const clean = stripThinkingBlocks(content.replace(/<!--.*?-->/gs, "")).trim()
 
     await navigator.clipboard.writeText(clean)
     setCopied(true)
@@ -545,7 +545,12 @@ export function StreamingMessage({ content }: StreamingMessageProps) {
           <StreamingThinkingBlock content={thinking} />
         ) : (
           <>
-            {thinking && <ThinkingBlock content={thinking} />}
+            {thinking && (
+              <ThinkingBlock
+                content={thinking}
+                label={(count) => `Thought for ${count} lines`}
+              />
+            )}
             <MarkdownContent content={answer} />
             <span className="animate-pulse">▊</span>
           </>
@@ -560,12 +565,9 @@ function AgentAwareContent({ content, projectPath }: { content: string; projectP
   const [results, setResults] = useState<import("@/lib/novel/agent-tools").FileEditResult[]>([])
   const [dismissed, setDismissed] = useState(false)
 
-  const parsed = useMemo(() => {
-    const { parseAgentResponse } = require("@/lib/novel/agent-parser") as typeof import("@/lib/novel/agent-parser")
-    return parseAgentResponse(content)
-  }, [content])
+  const parsed = useMemo(() => parseAgentResponse(content), [content])
 
-  const handleApply = useCallback(async (edits: import("@/lib/novel/agent-parser").FileEditAction[]) => {
+  const handleApply = useCallback(async (edits: FileEditAction[]) => {
     if (!projectPath) return []
     const { applyFileEdits } = await import("@/lib/novel/agent-tools")
     const editResults = await applyFileEdits(projectPath, edits)
@@ -614,7 +616,12 @@ function MarkdownContent({ content }: { content: string }) {
 
   return (
     <div>
-      {thinking && <ThinkingBlock content={thinking} />}
+      {thinking && (
+        <ThinkingBlock
+          content={thinking}
+          label={(count) => `Thought for ${count} lines`}
+        />
+      )}
       <div
         className="chat-markdown prose prose-sm max-w-none dark:prose-invert prose-p:my-1 prose-headings:my-2 prose-ul:my-1 prose-ol:my-1 prose-li:my-0 prose-pre:my-2 prose-code:text-xs prose-code:before:content-none prose-code:after:content-none"
         dir={direction}
@@ -690,33 +697,6 @@ function MarkdownContent({ content }: { content: string }) {
   )
 }
 
-/**
- * Separate <think>...</think> blocks from the main answer.
- * Handles multiple think blocks and partial (unclosed) thinking during streaming.
- */
-function separateThinking(text: string): { thinking: string | null; answer: string } {
-  // Match complete <think>...</think> and <thinking>...</thinking> blocks
-  const thinkRegex = /<think(?:ing)?>([\s\S]*?)<\/think(?:ing)?>/gi
-  const thinkParts: string[] = []
-  let answer = text
-
-  let match: RegExpExecArray | null
-  while ((match = thinkRegex.exec(text)) !== null) {
-    thinkParts.push(match[1].trim())
-  }
-  answer = answer.replace(/<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/gi, "").trim()
-
-  // Handle unclosed <think> or <thinking> tag (streaming in progress)
-  const unclosedMatch = answer.match(/<think(?:ing)?>([\s\S]*)$/i)
-  if (unclosedMatch) {
-    thinkParts.push(unclosedMatch[1].trim())
-    answer = answer.replace(/<think(?:ing)?>[\s\S]*$/i, "").trim()
-  }
-
-  const thinking = thinkParts.length > 0 ? thinkParts.join("\n\n") : null
-  return { thinking, answer }
-}
-
 /** Streaming thinking: shows latest ~5 lines rolling upward with animation */
 function StreamingThinkingBlock({ content }: { content: string }) {
   const lines = content.split("\n").filter((l) => l.trim())
@@ -724,12 +704,12 @@ function StreamingThinkingBlock({ content }: { content: string }) {
 
   return (
     <div className="rounded-md border border-dashed border-amber-500/30 bg-amber-50/50 dark:bg-amber-950/20 px-2.5 py-2">
-      <div className="flex items-center gap-1.5 mb-1.5">
+      <div className="mb-1.5 flex items-center gap-1.5">
         <span className="text-sm animate-pulse">💭</span>
         <span className="text-xs font-medium text-amber-700 dark:text-amber-400">Thinking...</span>
         <span className="text-[10px] text-amber-600/50 dark:text-amber-500/40">{lines.length} lines</span>
       </div>
-      <div className="h-[5lh] overflow-hidden text-xs text-amber-800/70 dark:text-amber-300/60 font-mono leading-relaxed">
+      <div className="h-[5lh] overflow-hidden font-mono text-xs leading-relaxed text-amber-800/70 dark:text-amber-300/60">
         {visibleLines.map((line, i) => (
           <div
             key={lines.length - 5 + i}
@@ -741,33 +721,6 @@ function StreamingThinkingBlock({ content }: { content: string }) {
         ))}
         <span className="animate-pulse text-amber-500">▊</span>
       </div>
-    </div>
-  )
-}
-
-/** Completed thinking: collapsed by default, click to expand */
-function ThinkingBlock({ content }: { content: string }) {
-  const [expanded, setExpanded] = useState(false)
-  const lines = content.split("\n").filter((l) => l.trim())
-
-  return (
-    <div className="mb-2 rounded-md border border-dashed border-amber-500/30 bg-amber-50/50 dark:bg-amber-950/20">
-      <button
-        type="button"
-        onClick={() => setExpanded(!expanded)}
-        className="flex w-full items-center gap-1.5 px-2.5 py-1.5 text-xs text-amber-700 dark:text-amber-400 hover:bg-amber-100/50 dark:hover:bg-amber-900/20 transition-colors"
-      >
-        <span className="text-sm">💭</span>
-        <span className="font-medium">Thought for {lines.length} lines</span>
-        <span className="text-amber-600/60 dark:text-amber-500/60">
-          {expanded ? "▼" : "▶"}
-        </span>
-      </button>
-      {expanded && (
-        <div className="border-t border-amber-500/20 px-2.5 py-2 text-xs text-amber-800/80 dark:text-amber-300/70 whitespace-pre-wrap max-h-64 overflow-y-auto font-mono leading-relaxed">
-          {content}
-        </div>
-      )}
     </div>
   )
 }

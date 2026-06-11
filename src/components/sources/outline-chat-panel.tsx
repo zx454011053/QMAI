@@ -5,10 +5,13 @@ import { useOutlineChatStore, type OutlineChatMessage } from "@/stores/outline-c
 import { normalizePath } from "@/lib/path-utils"
 import { readFile, writeFile, listDirectory, createDirectory, fileExists } from "@/commands/fs"
 import { streamChat, type ChatMessage } from "@/lib/llm-client"
+import { buildLlmUsageTracking } from "@/lib/llm-usage"
 import { hasUsableLlm } from "@/lib/has-usable-llm"
 import ReactMarkdown from "react-markdown"
 import { useState } from "react"
 import { FileEditPreview } from "@/components/chat/file-edit-preview"
+import { parseAgentResponse } from "@/lib/novel/agent-parser"
+import type { FileEditAction } from "@/lib/novel/agent-parser"
 
 async function loadOutlineContext(projectPath: string): Promise<{ context: string; sources: string[] }> {
   const pp = normalizePath(projectPath)
@@ -91,11 +94,10 @@ function OutlineAssistantMessage({ msg, index, isStreaming, streamingContent, ac
   // Parse for file edits
   const parsed = useMemo(() => {
     if (!displayContent) return { textContent: "", edits: [], hasEdits: false }
-    const { parseAgentResponse } = require("@/lib/novel/agent-parser") as typeof import("@/lib/novel/agent-parser")
     return parseAgentResponse(displayContent)
   }, [displayContent])
 
-  const handleApplyEdits = useCallback(async (edits: import("@/lib/novel/agent-parser").FileEditAction[]) => {
+  const handleApplyEdits = useCallback(async (edits: FileEditAction[]) => {
     if (!projectPath) return []
     const { applyFileEdits } = await import("@/lib/novel/agent-tools")
     const results = await applyFileEdits(projectPath, edits)
@@ -264,6 +266,9 @@ export function OutlineChatPanel({ onClose }: { onClose: () => void }) {
       // Add placeholder assistant message
       addMessage(convId, { id: crypto.randomUUID(), role: "assistant", content: "", sources })
 
+      const pp = normalizePath(project.path)
+      const usageTracking = buildLlmUsageTracking(pp, "大纲 AI 对话", `${pp}/wiki/outlines/_outline-chat`)
+
       await streamChat(llmConfig, chatMessages, {
         onToken: (token) => {
           result += token
@@ -271,7 +276,7 @@ export function OutlineChatPanel({ onClose }: { onClose: () => void }) {
         },
         onDone: () => {},
         onError: () => {},
-      }, controller.signal)
+      }, controller.signal, undefined, usageTracking)
 
       replaceLastAssistant(convId, result, sources)
       setStreamingContent("")
@@ -337,6 +342,9 @@ export function OutlineChatPanel({ onClose }: { onClose: () => void }) {
 
       addMessage(activeConversationId, { id: crypto.randomUUID(), role: "assistant", content: "", sources })
 
+      const pp = normalizePath(project.path)
+      const usageTracking = buildLlmUsageTracking(pp, "大纲 AI 对话", `${pp}/wiki/outlines/_outline-chat`)
+
       await streamChat(llmConfig, chatMessages, {
         onToken: (token) => {
           result += token
@@ -344,7 +352,7 @@ export function OutlineChatPanel({ onClose }: { onClose: () => void }) {
         },
         onDone: () => {},
         onError: () => {},
-      }, controller.signal)
+      }, controller.signal, undefined, usageTracking)
 
       replaceLastAssistant(activeConversationId, result, sources)
       setStreamingContent("")

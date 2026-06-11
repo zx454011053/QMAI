@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react"
 import {
-  FileText, FolderOpen, Search, Network, Brain, Settings, ArrowLeftRight, Sun, Moon, Monitor, Trash2, Sparkles, LayoutDashboard,
+  FileText, FolderOpen, Search, Network, Brain, Settings, ArrowLeftRight, Sun, Moon, Monitor, Trash2, Sparkles, LayoutDashboard, ScrollText, History,
 } from "lucide-react"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { useWikiStore } from "@/stores/wiki-store"
@@ -19,9 +19,11 @@ const SEARCH_NAV_ITEM: { view: NavView; icon: typeof FileText; labelKey: string;
   novelLabelKey: "novel.nav.search",
 }
 
-const NAV_ITEMS: { view: NavView; icon: typeof FileText; labelKey: string; novelLabelKey: string }[] = [
+const NAV_ITEMS: { view: NavView; icon: typeof FileText; labelKey: string; novelLabelKey: string; novelOnly?: boolean }[] = [
   { view: "wiki", icon: FileText, labelKey: "nav.wiki", novelLabelKey: "novel.nav.wiki" },
   { view: "sources", icon: FolderOpen, labelKey: "nav.sources", novelLabelKey: "novel.nav.sources" },
+  { view: "promptConfig", icon: ScrollText, labelKey: "nav.promptConfig", novelLabelKey: "novel.nav.promptConfig", novelOnly: true },
+  { view: "generationHistory", icon: History, labelKey: "nav.generationHistory", novelLabelKey: "novel.nav.generationHistory", novelOnly: true },
   { view: "graph", icon: Network, labelKey: "nav.graph", novelLabelKey: "novel.nav.graph" },
   { view: "lint", icon: Brain, labelKey: "nav.lint", novelLabelKey: "novel.nav.lint" },
   { view: "soul", icon: Sparkles, labelKey: "nav.soul", novelLabelKey: "novel.nav.soul" },
@@ -151,6 +153,10 @@ export function IconSidebar({ onToggleSidebar, onOpenSidebar, onSwitchProject }:
     ) {
       setSelectedFile(null)
     }
+    if (view === "promptConfig") {
+      setSelectedFile(null)
+      onOpenSidebar?.()
+    }
     setActiveView(view)
   }
 
@@ -176,7 +182,7 @@ export function IconSidebar({ onToggleSidebar, onOpenSidebar, onSwitchProject }:
         </button>
         {/* Top: main nav items */}
         <div className="flex flex-1 flex-col items-center gap-1">
-          {NAV_ITEMS.map(({ view, icon: Icon, labelKey, novelLabelKey }) => (
+          {NAV_ITEMS.filter((item) => !item.novelOnly || novelMode).map(({ view, icon: Icon, labelKey, novelLabelKey }) => (
             <Tooltip key={view}>
               <TooltipTrigger
                 onClick={() => handleNavClick(view)}

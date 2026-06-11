@@ -1,4 +1,6 @@
 import { streamChat, type StreamCallbacks } from "@/lib/llm-client"
+import { buildLlmUsageTracking } from "@/lib/llm-usage"
+import { normalizePath } from "@/lib/path-utils"
 import i18n from "@/i18n"
 import type { ChatMessage } from "@/lib/llm-providers"
 import { useWikiStore } from "@/stores/wiki-store"
@@ -112,7 +114,17 @@ ${langReminder}`
       },
     }
 
-    await streamChat(llmConfig, messages, callbacks, AbortSignal.timeout(120000))
+    await streamChat(
+      llmConfig,
+      messages,
+      callbacks,
+      AbortSignal.timeout(120000),
+      undefined,
+      buildLlmUsageTracking(
+        normalizePath(projectPath),
+        chapterNumber != null ? `章节审稿（第${chapterNumber}章）` : "章节审稿",
+      ),
+    )
 
     const jsonMatch = result.match(/\[[\s\S]*\]/)
     if (!jsonMatch) return []

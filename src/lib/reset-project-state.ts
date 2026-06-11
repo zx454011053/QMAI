@@ -9,11 +9,16 @@
  */
 
 import { pauseQueue as pauseIngestQueue } from "@/lib/ingest-queue"
+import { DEFAULT_PROMPT_CONFIG } from "@/lib/novel/prompt-config-defaults"
 import { useActivityStore } from "@/stores/activity-store"
 import { useChatStore } from "@/stores/chat-store"
+import { usePromptConfigStore } from "@/stores/prompt-config-store"
+import { useLlmUsageStore } from "@/stores/llm-usage-store"
+import { flushActiveProjectLlmUsage } from "@/lib/llm-usage-storage"
 import { useReviewStore } from "@/stores/review-store"
 
-export function resetProjectStores(): void {
+export async function resetProjectStores(): Promise<void> {
+  await flushActiveProjectLlmUsage()
   useChatStore.setState({
     conversations: [],
     messages: [],
@@ -28,13 +33,23 @@ export function resetProjectStores(): void {
     items: [],
   })
 
+  usePromptConfigStore.setState({
+    config: { ...DEFAULT_PROMPT_CONFIG },
+    customPrompts: [],
+    projectPath: null,
+    dirty: false,
+    selected: { kind: "builtin", key: "outlineGeneration" },
+  })
+
+  useLlmUsageStore.getState().resetAll()
+
   useActivityStore.setState({
     items: [],
   })
 }
 
 export async function resetProjectState(): Promise<void> {
-  resetProjectStores()
+  await resetProjectStores()
 
   const [dedupQueueMod, graphMod, fileSyncMod, scheduledImportMod] = await Promise.allSettled([
     import("@/lib/dedup-queue"),

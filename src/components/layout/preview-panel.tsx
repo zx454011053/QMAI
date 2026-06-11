@@ -148,8 +148,7 @@ function getChapterTitleFromPath(path: string): string {
 }
 
 const CHAPTER_TITLE_MIN_WIDTH_PX = 48
-const CHAPTER_TITLE_RESTING_EXTRA_WIDTH_PX = 2
-const CHAPTER_TITLE_EDITING_EXTRA_WIDTH_PX = 16
+const CHAPTER_TITLE_EXTRA_WIDTH_PX = 16
 
 export function PreviewPanel() {
   const { t } = useTranslation()
@@ -171,6 +170,9 @@ export function PreviewPanel() {
   const setFinalChapterSave = useWikiStore((s) => s.setFinalChapterSave)
   const outlineTasks = useOutlineGenerationStore((s) => s.tasks)
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const chapterHeaderSyncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const [chapterEditorEpoch, setChapterEditorEpoch] = useState(0)
+  const [chapterHeaderContent, setChapterHeaderContent] = useState("")
   const [isSavingFinal, setIsSavingFinal] = useState(false)
   const [saveStatus, setSaveStatus] = useState<string>("")
   const [showSnapshot, setShowSnapshot] = useState(false)
@@ -202,9 +204,42 @@ export function PreviewPanel() {
   const selectedFileRef = useRef<string | null>(selectedFile)
   const titleMeasureRef = useRef<HTMLSpanElement | null>(null)
 
+  const bumpChapterEditorEpoch = useCallback(() => {
+    setChapterEditorEpoch((epoch) => epoch + 1)
+  }, [])
+
+  const pushChapterEditorContent = useCallback((markdown: string) => {
+    fileContentRef.current = markdown
+    setFileContent(markdown)
+    setChapterHeaderContent(markdown)
+    bumpChapterEditorEpoch()
+  }, [bumpChapterEditorEpoch, setFileContent])
+
+  const scheduleChapterDiskSave = useCallback((markdown: string) => {
+    if (!selectedFile) return
+    if (markdown === lastLoadedRef.current) return
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
+    saveTimerRef.current = setTimeout(() => {
+      writeFile(selectedFile, markdown)
+        .then(() => {
+          lastLoadedRef.current = markdown
+          bumpDataVersion()
+        })
+        .catch((err) => console.error("保存失败:", err))
+    }, 1000)
+  }, [bumpDataVersion, selectedFile])
+
   useEffect(() => {
     fileContentRef.current = fileContent
   }, [fileContent])
+
+  useEffect(() => {
+    if (!selectedFile || !isChapterPath(selectedFile)) {
+      setChapterHeaderContent("")
+      return
+    }
+    setChapterHeaderContent(fileContent)
+  }, [fileContent, selectedFile])
 
   const syncChapterToCanonicalPath = useCallback(async (path: string, markdown: string) => {
     const normalized = normalizeChapterWriting(markdown)
@@ -232,11 +267,13 @@ export function PreviewPanel() {
       setFileContent(normalized)
       fileContentRef.current = normalized
       lastLoadedRef.current = normalized
+      setChapterHeaderContent(normalized)
+      bumpChapterEditorEpoch()
     }
 
     bumpDataVersion()
     return { targetPath, markdown: normalized }
-  }, [project, setFileContent, setFileTree, bumpDataVersion])
+  }, [bumpChapterEditorEpoch, project, setFileContent, setFileTree, bumpDataVersion])
 
   const flushChapterBeforeLeave = useCallback(async (path: string | null, markdown: string) => {
     if (!path || !isChapterPath(path)) return
@@ -244,6 +281,10 @@ export function PreviewPanel() {
     if (saveTimerRef.current) {
       clearTimeout(saveTimerRef.current)
       saveTimerRef.current = null
+    }
+    if (chapterHeaderSyncTimerRef.current) {
+      clearTimeout(chapterHeaderSyncTimerRef.current)
+      chapterHeaderSyncTimerRef.current = null
     }
     if (markdown === lastLoadedRef.current) return
     try {
@@ -291,13 +332,18 @@ export function PreviewPanel() {
     setFileContent("")
     fileContentRef.current = ""
     lastLoadedRef.current = ""
+    setChapterHeaderContent("")
+    setChapterEditorEpoch(0)
     setSaveStatus("")
 
     readFile(selectedFile)
       .then((content) => {
         if (cancelled || useWikiStore.getState().selectedFile !== selectedFile) return
         lastLoadedRef.current = content
+        fileContentRef.current = content
         setFileContent(content)
+        setChapterHeaderContent(content)
+        bumpChapterEditorEpoch()
         setSaveStatus("")
         setLoadedFilePath(selectedFile)
       })
@@ -311,7 +357,7 @@ export function PreviewPanel() {
     return () => {
       cancelled = true
     }
-  }, [selectedFile, setFileContent, flushChapterBeforeLeave])
+  }, [bumpChapterEditorEpoch, selectedFile, setFileContent, flushChapterBeforeLeave])
 
   useEffect(() => {
     return () => {
@@ -325,29 +371,28 @@ export function PreviewPanel() {
   const handleSave = useCallback(
     (markdown: string) => {
       if (!selectedFile) return
-      const normalized = isChapterPath(selectedFile)
-        ? normalizeChapterWriting(markdown)
-        : markdown
-      setFileContent(normalized)
-      fileContentRef.current = normalized
-      // Ignore no-op saves from the editor's initial re-emit. Only write
-      // when the user has actually changed the content relative to the
-      // last disk read.
-      if (normalized === lastLoadedRef.current) return
+      fileContentRef.current = markdown
+      if (isChapterPath(selectedFile)) {
+        if (chapterHeaderSyncTimerRef.current) clearTimeout(chapterHeaderSyncTimerRef.current)
+        chapterHeaderSyncTimerRef.current = setTimeout(() => {
+          setChapterHeaderContent(fileContentRef.current)
+        }, 500)
+        scheduleChapterDiskSave(markdown)
+        return
+      }
+      setFileContent(markdown)
+      if (markdown === lastLoadedRef.current) return
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
       saveTimerRef.current = setTimeout(() => {
-        writeFile(selectedFile, normalized)
+        writeFile(selectedFile, markdown)
           .then(() => {
-            // Our own write becomes the new "last loaded" — subsequent
-            // re-emits from Milkdown that match this content must not
-            // trigger another save.
-            lastLoadedRef.current = normalized
+            lastLoadedRef.current = markdown
             bumpDataVersion()
           })
           .catch((err) => console.error("保存失败:", err))
       }, 1000)
     },
-    [selectedFile, setFileContent, bumpDataVersion]
+    [bumpDataVersion, scheduleChapterDiskSave, selectedFile, setFileContent],
   )
 
   const chapterFrontmatter = useMemo(() => {
@@ -443,8 +488,8 @@ export function PreviewPanel() {
   })()
   const chapterHeader = useMemo(() => {
     if (!selectedFile || !isChapterPath(selectedFile) || getFileCategory(selectedFile) !== "markdown") return null
-    return buildChapterEditorHeader(fileContent)
-  }, [fileContent, selectedFile])
+    return buildChapterEditorHeader(chapterHeaderContent)
+  }, [chapterHeaderContent, selectedFile])
   const chapterDisplayTitle = chapterHeader
     ? chapterHeader.heading || (selectedFile ? getChapterTitleFromPath(selectedFile) : "")
     : ""
@@ -469,7 +514,7 @@ export function PreviewPanel() {
     )
   ) : null
   const chapterWordCountMeta = chapterHeader ? (
-    <span className="shrink-0 text-sm leading-5 text-muted-foreground">
+    <span className="inline-block min-w-[5.5rem] shrink-0 text-right text-sm tabular-nums leading-5 text-muted-foreground">
       {chapterHeader.wordCountLabel}
     </span>
   ) : null
@@ -497,10 +542,10 @@ export function PreviewPanel() {
     const measure = titleMeasureRef.current
     if (!measure) return
     const measuredWidth = Math.ceil(measure.getBoundingClientRect().width)
-    const extraWidth = chapterTitleEditing ? CHAPTER_TITLE_EDITING_EXTRA_WIDTH_PX : CHAPTER_TITLE_RESTING_EXTRA_WIDTH_PX
+    const extraWidth = CHAPTER_TITLE_EXTRA_WIDTH_PX
     const nextWidth = Math.max(measuredWidth + extraWidth, CHAPTER_TITLE_MIN_WIDTH_PX)
     setChapterTitleWidthPx((currentWidth) => currentWidth === nextWidth ? currentWidth : nextWidth)
-  }, [chapterHeader, chapterTitleEditing, chapterTitleMeasureText])
+  }, [chapterHeader, chapterTitleMeasureText])
 
   const normalizeChapterTitleInput = useCallback((title: string) => {
     const trimmed = title.trim()
@@ -666,8 +711,8 @@ export function PreviewPanel() {
 
   const handleFormatWriting = useCallback(async () => {
     if (!selectedFile || !canFormatWriting) return
-    const formatted = normalizeChapterWriting(fileContent)
-    setFileContent(formatted)
+    const formatted = normalizeChapterWriting(fileContentRef.current)
+    pushChapterEditorContent(formatted)
     lastLoadedRef.current = formatted
     try {
       await writeFile(selectedFile, formatted)
@@ -675,7 +720,7 @@ export function PreviewPanel() {
     } catch (err) {
       console.error("格式化写作内容失败:", err)
     }
-  }, [canFormatWriting, fileContent, selectedFile, setFileContent, bumpDataVersion])
+  }, [canFormatWriting, pushChapterEditorContent, selectedFile, bumpDataVersion])
 
   const handleIngestOutline = useCallback(() => {
     if (!project || !selectedFile || !canIngestOutline || isOutlineIngesting) return
@@ -726,8 +771,10 @@ export function PreviewPanel() {
 
   const handleDeAiApply = useCallback(() => {
     setDeAiPreviewOpen(false)
-    handleSave(replaceWholeChapterBody(fileContent, deAiCandidateContent))
-  }, [deAiCandidateContent, fileContent, handleSave])
+    const next = replaceWholeChapterBody(fileContentRef.current, deAiCandidateContent)
+    pushChapterEditorContent(next)
+    scheduleChapterDiskSave(next)
+  }, [deAiCandidateContent, pushChapterEditorContent, scheduleChapterDiskSave])
 
   const handleDeAiSaveDraft = useCallback(async () => {
     if (!selectedFile || !project) return
@@ -806,7 +853,7 @@ export function PreviewPanel() {
   const handleApplySelectionTransform = useCallback(() => {
     if (!selectionTransformSelection || !selectionTransformCandidateContent) return
 
-    const { rawBlock, body } = parseFrontmatter(fileContent)
+    const { rawBlock, body } = parseFrontmatter(fileContentRef.current)
     const { heading, body: currentBody } = splitChapterHeading(body)
     const replaced = replaceChapterBodySelection(
       currentBody,
@@ -820,14 +867,16 @@ export function PreviewPanel() {
       return
     }
 
-    handleSave(rawBlock + rebuildChapterBody(heading, replaced.body))
+    const next = rawBlock + rebuildChapterBody(heading, replaced.body)
+    pushChapterEditorContent(next)
+    scheduleChapterDiskSave(next)
     setSelectionTransformOpen(false)
     setSelectionTransformAction(null)
     setSelectionTransformSelection(null)
     setSelectionTransformSourceContent("")
     setSelectionTransformCandidateContent("")
     setSaveStatus("")
-  }, [fileContent, handleSave, selectionTransformCandidateContent, selectionTransformSelection])
+  }, [pushChapterEditorContent, scheduleChapterDiskSave, selectionTransformCandidateContent, selectionTransformSelection])
 
   const handleCloseSelectionTransform = useCallback(() => {
     setSelectionTransformOpen(false)
@@ -840,6 +889,7 @@ export function PreviewPanel() {
   useEffect(() => {
     return () => {
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
+      if (chapterHeaderSyncTimerRef.current) clearTimeout(chapterHeaderSyncTimerRef.current)
     }
   }, [])
 
@@ -905,7 +955,7 @@ export function PreviewPanel() {
 
   return (
     <div className="flex h-full flex-col">
-      <div className="border-b px-3 py-1.5">
+      <div className={`shrink-0 border-b px-3 py-1.5 ${chapterHeader ? "border-border/60 bg-muted/45" : ""}`}>
         <div className="flex items-center gap-2">
           <div className="relative flex min-w-0 shrink items-center gap-1 overflow-hidden">
             {chapterHeader ? (
@@ -1073,18 +1123,21 @@ export function PreviewPanel() {
           </div>
         </div>
         {visibleSaveStatus ? (
-          <div className="mt-1 text-right">
+          <div className="mt-1 min-h-[1.125rem] text-right">
             <span className="block truncate text-[11px] text-muted-foreground/80">
               {visibleSaveStatus}
             </span>
           </div>
-        ) : null}
+        ) : (
+          chapterHeader ? <div className="mt-1 min-h-[1.125rem]" aria-hidden="true" /> : null
+        )}
       </div>
-      <div className="flex-1 min-w-0 overflow-auto">
+      <div className={`flex-1 min-w-0 overflow-hidden ${chapterHeader ? "bg-muted/25" : "overflow-auto"}`}>
         {category === "markdown" ? (
           <WikiEditor
             key={selectedFile}
             content={fileContent}
+            contentEpoch={chapterEditorEpoch}
             onSave={handleSave}
             defaultMode={inferEditorMode(selectedFile)}
             immersiveWriting={isChapterPath(selectedFile)}

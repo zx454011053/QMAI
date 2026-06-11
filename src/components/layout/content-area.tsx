@@ -43,6 +43,16 @@ const ReviewCenterView = lazy(async () => {
   return { default: mod.ReviewCenterView }
 })
 
+const PromptConfigEditorView = lazy(async () => {
+  const mod = await import("@/components/novel/prompt-config-editor-view")
+  return { default: mod.PromptConfigEditorView }
+})
+
+const GenerationHistoryView = lazy(async () => {
+  const mod = await import("@/components/generation/generation-history-detail-view")
+  return { default: mod.GenerationHistoryView }
+})
+
 function LoadingView() {
   return (
     <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
@@ -72,6 +82,20 @@ export function ContentArea() {
         content = (
           <Suspense fallback={<LoadingView />}>
             <SourcesView />
+          </Suspense>
+        )
+        break
+      case "promptConfig":
+        content = (
+          <Suspense fallback={<LoadingView />}>
+            <PromptConfigEditorView />
+          </Suspense>
+        )
+        break
+      case "generationHistory":
+        content = (
+          <Suspense fallback={<LoadingView />}>
+            <GenerationHistoryView />
           </Suspense>
         )
         break
@@ -116,5 +140,5 @@ export function ContentArea() {
     }
   }
 
-  return <div className="h-full">{content}</div>
+  return <div className="flex h-full min-h-0 flex-col overflow-hidden">{content}</div>
 }

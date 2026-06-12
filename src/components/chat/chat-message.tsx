@@ -25,7 +25,7 @@ import { MermaidDiagram, unwrapMermaidPre } from "@/components/mermaid-diagram"
 import { canContinueUnfinishedDeepChapter } from "./chat-resume"
 import { getCopyableAssistantContent } from "@/lib/chat-copy-content"
 import { parseAgentResponse } from "@/lib/novel/agent-parser"
-import { separateThinking, stripThinkingBlocks } from "@/lib/thinking-content"
+import { separateThinking } from "@/lib/thinking-content"
 import { ThinkingBlock } from "@/components/llm/thinking-block"
 import type { FileEditAction } from "@/lib/novel/agent-parser"
 
@@ -727,33 +727,6 @@ function MarkdownContent({ content }: { content: string }) {
   )
 }
 
-/**
- * Separate <think>...</think> blocks from the main answer.
- * Handles multiple think blocks and partial (unclosed) thinking during streaming.
- */
-function separateThinking(text: string): { thinking: string | null; answer: string } {
-  // Match complete <think>...</think> and <thinking>...</thinking> blocks
-  const thinkRegex = /<think(?:ing)?>([\s\S]*?)<\/think(?:ing)?>/gi
-  const thinkParts: string[] = []
-  let answer = text
-
-  let match: RegExpExecArray | null
-  while ((match = thinkRegex.exec(text)) !== null) {
-    thinkParts.push(match[1].trim())
-  }
-  answer = answer.replace(/<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/gi, "").trim()
-
-  // Handle unclosed <think> or <thinking> tag (streaming in progress)
-  const unclosedMatch = answer.match(/<think(?:ing)?>([\s\S]*)$/i)
-  if (unclosedMatch) {
-    thinkParts.push(unclosedMatch[1].trim())
-    answer = answer.replace(/<think(?:ing)?>[\s\S]*$/i, "").trim()
-  }
-
-  const thinking = thinkParts.length > 0 ? thinkParts.join("\n\n") : null
-  return { thinking, answer }
-}
-
 /** Streaming thinking: show every stage so the user can inspect progress. */
 function StreamingThinkingBlock({ content }: { content: string }) {
   const lines = content.split("\n").filter((l) => l.trim())
@@ -774,24 +747,6 @@ function StreamingThinkingBlock({ content }: { content: string }) {
           </div>
         ))}
         <span className="animate-pulse text-amber-500">▊</span>
-      </div>
-    </div>
-  )
-}
-
-/** Completed thinking: keep it fully visible; the outer chat scroll owns scrolling. */
-function ThinkingBlock({ content }: { content: string }) {
-  const lines = content.split("\n").filter((l) => l.trim())
-
-  return (
-    <div className="mb-2 rounded-md border border-dashed border-amber-500/30 bg-amber-50/50 dark:bg-amber-950/20">
-      <div className="flex w-full items-center gap-1.5 px-2.5 py-1.5 text-xs text-amber-700 dark:text-amber-400">
-        <span className="text-sm">💭</span>
-        <span className="font-medium">思考过程</span>
-        <span className="text-[10px] text-amber-600/60 dark:text-amber-500/60">{lines.length} 行</span>
-      </div>
-      <div className="max-h-72 overflow-y-auto border-t border-amber-500/20 px-2.5 py-2 pr-1 text-xs text-amber-800/80 dark:text-amber-300/70 whitespace-pre-wrap break-words font-mono leading-relaxed">
-        {content}
       </div>
     </div>
   )

@@ -12,7 +12,7 @@ import { useChatStore, chatMessagesToLLM, type UsageInfo, type DisplayMessage } 
 import { useWikiStore } from "@/stores/wiki-store"
 import { streamChat, type ChatMessage as LLMMessage } from "@/lib/llm-client"
 import { isDeepSeekEndpoint } from "@/lib/llm-providers"
-import { buildLlmUsageTrackingFromFile } from "@/lib/llm-usage"
+import { buildLlmUsageTracking, buildLlmUsageTrackingFromFile } from "@/lib/llm-usage"
 import { executeIngestWrites } from "@/lib/ingest"
 import { routeTask, buildTaskDirective } from "@/lib/novel/task-router"
 import { listDirectory, readFile, writeFile, createDirectory, deleteFile } from "@/commands/fs"
@@ -189,7 +189,6 @@ export function ChatPanel() {
   const chatEditModeEnabled = useWikiStore((s) => s.chatEditModeEnabled)
   const setChatEditModeEnabled = useWikiStore((s) => s.setChatEditModeEnabled)
   const setFileTree = useWikiStore((s) => s.setFileTree)
-  const selectedFile = useWikiStore((s) => s.selectedFile)
 
   const abortRef = useRef<AbortController | null>(null)
   const streamSessionGuardRef = useRef(createStreamSessionGuard())
@@ -953,8 +952,9 @@ export function ChatPanel() {
         appendStreamToken("</think>")
       }
 
-      const chatUsageTracking = novelMode && project && selectedFile
-        ? buildLlmUsageTrackingFromFile(project.path, selectedFile, "AI 对话")
+      const chatUsageTracking = project
+        ? buildLlmUsageTrackingFromFile(project.path, selectedFile ?? "", "AI 对话")
+          ?? buildLlmUsageTracking(project.path, "AI 对话", selectedFile ?? undefined)
         : undefined
       const trackUsage = !!chatUsageTracking || isDeepSeekEndpoint(llmConfig)
 
@@ -976,19 +976,11 @@ export function ChatPanel() {
             : undefined,
           onDone: () => {
             closeReasoning()
-            finalizeStream(
-              accumulated,
-              queryRefs,
-              streamUsage,
-            )
-            abortRef.current = null
             streamSessionGuardRef.current.finish(sessionId, () => {
-              closeReasoning()
-              finalizeStream(accumulated, queryRefs)
+              finalizeStream(accumulated, queryRefs, streamUsage)
               activeStreamSessionRef.current = null
               abortRef.current = null
             })
-            // save-worthy detection removed — user has direct "Save to Wiki" button on each message
           },
           onError: (err) => {
             streamSessionGuardRef.current.finish(sessionId, () => {
@@ -999,13 +991,27 @@ export function ChatPanel() {
           },
         },
         controller.signal,
-        undefined,
-        chatUsageTracking,
         { reasoning: resolveUserVisibleReasoning(effectiveChatLlmConfig.reasoning) },
+        chatUsageTracking,
       )
     },
-    [llmConfig, addMessage, setStreaming, appendStreamToken, finalizeStream, createConversation, maxHistoryMessages, requestSoulDialog, novelMode, project, selectedFile],
-    [aiChatModel, llmConfig, chatEditModeEnabled, addMessage, setStreaming, setStreamingContent, appendStreamToken, finalizeStream, createConversation, maxHistoryMessages, requestSoulDialog, deepChapterEnabled, project, novelMode, selectedFile],
+    [
+      aiChatModel,
+      llmConfig,
+      chatEditModeEnabled,
+      addMessage,
+      setStreaming,
+      setStreamingContent,
+      appendStreamToken,
+      finalizeStream,
+      createConversation,
+      maxHistoryMessages,
+      requestSoulDialog,
+      deepChapterEnabled,
+      project,
+      novelMode,
+      selectedFile,
+    ],
   )
 
   const handleStop = useCallback(() => {

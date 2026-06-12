@@ -10,8 +10,7 @@ import { hasUsableLlm } from "@/lib/has-usable-llm"
 import ReactMarkdown from "react-markdown"
 import { useState } from "react"
 import { FileEditPreview } from "@/components/chat/file-edit-preview"
-import { parseAgentResponse } from "@/lib/novel/agent-parser"
-import type { FileEditAction } from "@/lib/novel/agent-parser"
+import { parseAgentResponse, type FileEditAction } from "@/lib/novel/agent-parser"
 import { ChatDockControls } from "@/components/chat/chat-dock-controls"
 import { OUTLINE_SECTION_GENERATION_CONFIGS } from "@/lib/novel/outline-generation"
 import { prepareOutlineSaveDraft } from "@/lib/outline-save"
@@ -131,7 +130,6 @@ function OutlineAssistantMessage({ msg, index, isStreaming, streamingContent, ac
   // Parse for file edits
   const parsed = useMemo(() => {
     if (!answer) return { textContent: "", edits: [], hasEdits: false }
-    const { parseAgentResponse } = require("@/lib/novel/agent-parser") as typeof import("@/lib/novel/agent-parser")
     return parseAgentResponse(answer)
   }, [answer])
 
@@ -345,6 +343,9 @@ export function OutlineChatPanel({ onClose }: { onClose: () => void }) {
           appendToResult("</think>")
         }
 
+        const pp = normalizePath(project.path)
+        const usageTracking = buildLlmUsageTracking(pp, "大纲 AI 对话", `${pp}/wiki/outlines/_outline-chat`)
+
         await streamChat(llmConfig, chatMessages, {
           onToken: (token) => {
             closeReasoning()
@@ -357,7 +358,7 @@ export function OutlineChatPanel({ onClose }: { onClose: () => void }) {
           onError: () => {
             closeReasoning()
           },
-        }, controller.signal, { reasoning: resolveUserVisibleReasoning(llmConfig.reasoning) })
+        }, controller.signal, { reasoning: resolveUserVisibleReasoning(llmConfig.reasoning) }, usageTracking)
       } else {
         await runDeepOutlineGeneration(
           {

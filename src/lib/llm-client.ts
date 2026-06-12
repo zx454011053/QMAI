@@ -167,21 +167,16 @@ export async function streamChat(
   const activeCallbacks = wrapStreamChatCallbacks(config, messages, callbacks, usageTracking)
   const { onToken, onDone, onError, onUsage } = activeCallbacks
   const runtimeConfig = await resolveRuntimeLocalCliConfig(config)
-  const { onToken, onDone, onError } = callbacks
 
   // Claude Code CLI uses a subprocess transport (stdin/stdout), not
   // HTTP. Dispatch before getProviderConfig — that function throws for
   // this provider because it has no URL/headers.
   if (runtimeConfig.provider === "claude-code") {
-    return streamViaClaudeCodeCli(runtimeConfig, messages, callbacks, signal, requestOverrides)
-  if (config.provider === "claude-code") {
-    return streamViaClaudeCodeCli(config, messages, activeCallbacks, signal, mergedOverrides)
+    return streamViaClaudeCodeCli(runtimeConfig, messages, activeCallbacks, signal, mergedOverrides)
   }
 
   if (runtimeConfig.provider === "codex-cli") {
-    return streamViaCodexCli(runtimeConfig, messages, callbacks, signal, requestOverrides)
-  if (config.provider === "codex-cli") {
-    return streamViaCodexCli(config, messages, activeCallbacks, signal, mergedOverrides)
+    return streamViaCodexCli(runtimeConfig, messages, activeCallbacks, signal, mergedOverrides)
   }
 
   const providerConfig = getProviderConfig(runtimeConfig)
@@ -213,7 +208,7 @@ export async function streamChat(
     combinedSignal = timeoutController.signal
   }
 
-  const body = providerConfig.buildBody(messages, requestOverrides)
+  const body = providerConfig.buildBody(messages, mergedOverrides)
   const requestInit: RequestInit = {
     method: "POST",
     headers: providerConfig.headers,

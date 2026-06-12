@@ -20,7 +20,6 @@ export type Provider =
   | "minimax"
   | "claude-code"
   | "codex-cli"
-  | "deepseek"
 
 export interface LlmPreset {
   /** Stable id used as the dropdown value. */

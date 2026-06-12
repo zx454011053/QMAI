@@ -1,6 +1,4 @@
 import { streamChat, type StreamCallbacks } from "@/lib/llm-client"
-import { buildLlmUsageTracking } from "@/lib/llm-usage"
-import { normalizePath } from "@/lib/path-utils"
 import i18n from "@/i18n"
 import type { ChatMessage } from "@/lib/llm-providers"
 import { useWikiStore } from "@/stores/wiki-store"

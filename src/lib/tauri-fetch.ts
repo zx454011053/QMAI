@@ -18,7 +18,6 @@
  * without crashing at module load or call time.
  */
 
-import { isTauri } from "@/lib/platform"
 
 let pluginFetchPromise: Promise<typeof globalThis.fetch> | null = null
 

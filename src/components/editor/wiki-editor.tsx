@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { Editor, rootCtx, defaultValueCtx } from "@milkdown/kit/core"
 import { commonmark } from "@milkdown/kit/preset/commonmark"
 import { gfm } from "@milkdown/kit/preset/gfm"
@@ -42,6 +42,10 @@ interface FloatingToolbarPosition {
   left: number
 }
 
+function getWritingScrollContainer(el: HTMLElement): HTMLElement | null {
+  return el.closest(".immersive-scroll-container")
+}
+
 function WritingTextarea({
   content,
   contentEpoch,
@@ -58,6 +62,7 @@ function WritingTextarea({
   const [selection, setSelection] = useState<ChapterBodySelection | null>(null)
   const [toolbarPosition, setToolbarPosition] = useState<FloatingToolbarPosition | null>(null)
   const contentEpochRef = useRef(contentEpoch)
+  const previousBodyRef = useRef(initialSplit.body)
 
   useEffect(() => {
     if (contentEpochRef.current === contentEpoch) return
@@ -70,7 +75,6 @@ function WritingTextarea({
         return
       }
     }
-    const previousBody = previousBodyRef.current
     previousBodyRef.current = b
     setHeading(h)
     setValue(b)
@@ -80,6 +84,7 @@ function WritingTextarea({
     requestAnimationFrame(() => {
       const el = textareaRef.current
       if (!el) return
+      if (document.activeElement === el) return
       el.focus()
       const caret = el.value.length
       el.setSelectionRange(caret, caret)
@@ -94,13 +99,18 @@ function WritingTextarea({
     () => () => {
       const el = textareaRef.current
       if (!el) return
+      const scrollContainer = getWritingScrollContainer(el)
+      const savedScrollTop = scrollContainer?.scrollTop ?? 0
       el.style.height = "auto"
       el.style.height = `${el.scrollHeight}px`
+      if (scrollContainer) {
+        scrollContainer.scrollTop = savedScrollTop
+      }
     },
     [],
   )
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     resize()
   }, [value, resize])
 

@@ -794,6 +794,7 @@ export function getProviderConfig(config: LlmConfig): ProviderConfig {
         buildBody: (messages, overrides) =>
           buildOpenAiCompatibleBody(config, messages, overrides),
         parseStream: parseOpenAiLine,
+        parseStreamWithUsage: parseOpenAiLineWithUsage,
       }
     }
 
@@ -913,6 +914,7 @@ export function getProviderConfig(config: LlmConfig): ProviderConfig {
           return body
         },
         parseStream: parseOpenAiLine,
+        parseStreamWithUsage: parseOpenAiLineWithUsage,
       }
     }
 

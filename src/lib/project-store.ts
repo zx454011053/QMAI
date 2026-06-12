@@ -44,15 +44,15 @@ const ACTIVE_PRESET_KEY = "activePresetId"
 const DEEPSEEK_PRESET_ID = "deepseek"
 const DEEPSEEK_DEFAULT_ENDPOINT = "https://api.deepseek.com/v1"
 
-type LegacyLlmConfig = LlmConfig & {
+type LegacyLlmConfig = Omit<LlmConfig, "provider"> & {
   provider: LlmConfig["provider"] | "deepseek"
   showCacheHitRate?: boolean
 }
 
 export function migrateLlmConfig(config: LegacyLlmConfig): LlmConfig {
-  const { showCacheHitRate: _removed, ...rest } = config
-  if (rest.provider !== "deepseek") {
-    return rest as LlmConfig
+  const { showCacheHitRate: _removed, provider, ...rest } = config
+  if (provider !== "deepseek") {
+    return { ...rest, provider } as LlmConfig
   }
   return {
     ...rest,

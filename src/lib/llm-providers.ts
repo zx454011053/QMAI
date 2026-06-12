@@ -275,8 +275,10 @@ function effectiveReasoning(config: LlmConfig, overrides?: RequestOverrides): Re
 }
 
 function isDeepSeekEndpoint(config: LlmConfig): boolean {
-  return config.provider === "deepseek" || /deepseek/i.test(config.model) || /deepseek/i.test(config.customEndpoint)
+  return /deepseek/i.test(config.model) || /deepseek/i.test(config.customEndpoint)
 }
+
+export { isDeepSeekEndpoint }
 
 function isQwenThinkingModel(model: string): boolean {
   return /qwen[-_]?3/i.test(model)
@@ -352,11 +354,8 @@ function buildOpenAiCompatibleBody(
       }
     }
     // DeepSeek returns prompt_cache_hit_tokens / prompt_cache_miss_tokens
-    // in the final stream chunk when include_usage is set. See:
-    // https://api-docs.deepseek.com/zh-cn/guides/kv_cache
-    if (config.showCacheHitRate || overrides?.includeStreamUsage) {
-      body.stream_options = { include_usage: true }
-    }
+    // in the final stream chunk when include_usage is set.
+    body.stream_options = { include_usage: true }
     return body
   }
 
@@ -690,22 +689,6 @@ export function getProviderConfig(config: LlmConfig): ProviderConfig {
         headers: {
           "Content-Type": JSON_CONTENT_TYPE,
           ...localLlmOriginHeader(),
-        },
-        buildBody: (messages, overrides) => ({
-          ...buildOpenAiCompatibleBody(config, messages, overrides),
-          model,
-        }),
-        parseStream: parseOpenAiLine,
-        parseStreamWithUsage: parseOpenAiLineWithUsage,
-      }
-    }
-
-    case "deepseek": {
-      return {
-        url: "https://api.deepseek.com/v1/chat/completions",
-        headers: {
-          "Content-Type": JSON_CONTENT_TYPE,
-          Authorization: `Bearer ${apiKey}`,
         },
         buildBody: (messages, overrides) => ({
           ...buildOpenAiCompatibleBody(config, messages, overrides),

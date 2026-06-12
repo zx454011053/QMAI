@@ -19,7 +19,6 @@ import { CognitionPanel } from "@/components/novel/cognition-panel"
 import { hasUsableLlm } from "@/lib/has-usable-llm"
 import { getNextChatExpanded } from "./chat-layout"
 import { DeAiPreviewDialog } from "@/components/novel/de-ai-preview-dialog"
-import { LlmUsageDialog } from "@/components/llm/llm-usage-dialog"
 import { buildLlmUsageTrackingFromFile } from "@/lib/llm-usage"
 import { TextTransformPreviewDialog } from "@/components/novel/text-transform-preview-dialog"
 import { buildDeAiRewriteMessages } from "@/lib/novel/de-ai-adapter"
@@ -193,7 +192,6 @@ export function PreviewPanel() {
   const [chapterTitleEditing, setChapterTitleEditing] = useState(false)
   const [chapterTitleWidthPx, setChapterTitleWidthPx] = useState(CHAPTER_TITLE_MIN_WIDTH_PX)
   const [loadedFilePath, setLoadedFilePath] = useState<string | null>(null)
-  const [showUsageDialog, setShowUsageDialog] = useState(false)
   // Snapshot of what was most recently loaded from disk. Milkdown re-emits
   // `markdownUpdated` on initial parse (before the user types anything),
   // which used to trigger an auto-save that could write back a placeholder
@@ -449,13 +447,6 @@ export function PreviewPanel() {
     const meta = parseChapterMeta(chapterFrontmatter)
     return meta?.chapterNumber ?? null
   }, [chapterFrontmatter])
-  const canViewUsage = Boolean(
-    novelMode &&
-    project &&
-    selectedFile &&
-    getFileCategory(selectedFile) === "markdown" &&
-    (isChapterPath(selectedFile) || isOutlinePath(selectedFile)),
-  )
   const canViewSnapshot = Boolean(novelMode && project && chapterNumber !== null)
   const currentFinalChapterSave = finalChapterSave != null && finalChapterSave.projectPath === project?.path && finalChapterSave.filePath === selectedFile ? finalChapterSave : null
   const isFinalChapterSaving = currentFinalChapterSave?.saving ?? isSavingFinal
@@ -1003,16 +994,6 @@ export function PreviewPanel() {
             ) : null}
           </div>
           <div className="ml-auto flex items-center justify-end gap-1">
-          {canViewUsage ? (
-            <button
-              type="button"
-              onClick={() => setShowUsageDialog(true)}
-              className="shrink-0 rounded border border-border px-2 py-1 text-xs text-foreground hover:bg-accent"
-              title="查看当前文件的 LLM 请求次数与 token 用量"
-            >
-              查看用量
-            </button>
-          ) : null}
           {chapterHeader ? (
             <button
               type="button"
@@ -1201,15 +1182,6 @@ export function PreviewPanel() {
         onApply={handleApplySelectionTransform}
         onClose={handleCloseSelectionTransform}
       />
-      {showUsageDialog && project && selectedFile ? (
-        <LlmUsageDialog
-          open={showUsageDialog}
-          onOpenChange={setShowUsageDialog}
-          projectPath={project.path}
-          filePath={selectedFile}
-          title={isOutlinePath(selectedFile) ? "大纲 LLM 用量" : "章节 LLM 用量"}
-        />
-      ) : null}
     </div>
   )
 }

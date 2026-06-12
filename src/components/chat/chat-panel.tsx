@@ -9,6 +9,7 @@ import { ChatInput } from "./chat-input"
 import { useChatStore, chatMessagesToLLM, type UsageInfo } from "@/stores/chat-store"
 import { useWikiStore } from "@/stores/wiki-store"
 import { streamChat, type ChatMessage as LLMMessage } from "@/lib/llm-client"
+import { isDeepSeekEndpoint } from "@/lib/llm-providers"
 import { buildLlmUsageTrackingFromFile } from "@/lib/llm-usage"
 import { executeIngestWrites } from "@/lib/ingest"
 import { routeTask, buildTaskDirective } from "@/lib/novel/task-router"
@@ -593,6 +594,7 @@ export function ChatPanel() {
       const chatUsageTracking = novelMode && project && selectedFile
         ? buildLlmUsageTrackingFromFile(project.path, selectedFile, "AI 对话")
         : undefined
+      const trackUsage = !!chatUsageTracking || isDeepSeekEndpoint(llmConfig)
 
       await streamChat(
         llmConfig,
@@ -604,7 +606,7 @@ export function ChatPanel() {
             appendStreamToken(token)
           },
           onReasoningToken: appendReasoning,
-          onUsage: llmConfig.showCacheHitRate || chatUsageTracking
+          onUsage: trackUsage
             ? (usage) => {
                 streamUsage = usage
               }
@@ -614,7 +616,7 @@ export function ChatPanel() {
             finalizeStream(
               accumulated,
               queryRefs,
-              llmConfig.showCacheHitRate ? streamUsage : undefined,
+              streamUsage,
             )
             abortRef.current = null
             // save-worthy detection removed — user has direct "Save to Wiki" button on each message

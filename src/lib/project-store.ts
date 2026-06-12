@@ -40,6 +40,49 @@ export async function addToRecentProjects(
 const LLM_CONFIG_KEY = "llmConfig"
 const PROVIDER_CONFIGS_KEY = "providerConfigs"
 const ACTIVE_PRESET_KEY = "activePresetId"
+const DEEPSEEK_PRESET_ID = "deepseek"
+const DEEPSEEK_DEFAULT_ENDPOINT = "https://api.deepseek.com/v1"
+
+type LegacyLlmConfig = LlmConfig & {
+  provider: LlmConfig["provider"] | "deepseek"
+  showCacheHitRate?: boolean
+}
+
+export function migrateLlmConfig(config: LegacyLlmConfig): LlmConfig {
+  const { showCacheHitRate: _removed, ...rest } = config
+  if (rest.provider !== "deepseek") {
+    return rest as LlmConfig
+  }
+  return {
+    ...rest,
+    provider: "custom",
+    customEndpoint: rest.customEndpoint || DEEPSEEK_DEFAULT_ENDPOINT,
+    apiMode: rest.apiMode ?? "chat_completions",
+  }
+}
+
+export function migrateProviderConfigs(configs: ProviderConfigs): ProviderConfigs {
+  const next: ProviderConfigs = { ...configs }
+  const legacy = next[DEEPSEEK_PRESET_ID]
+  if (!legacy) return next
+
+  delete next[DEEPSEEK_PRESET_ID]
+  if (!next.custom) {
+    next.custom = {
+      apiKey: legacy.apiKey,
+      model: legacy.model,
+      baseUrl: legacy.baseUrl ?? DEEPSEEK_DEFAULT_ENDPOINT,
+      maxContextSize: legacy.maxContextSize,
+      reasoning: legacy.reasoning,
+      apiMode: legacy.apiMode ?? "chat_completions",
+    }
+  }
+  return next
+}
+
+export function migrateActivePresetId(id: string | null): string | null {
+  return id === DEEPSEEK_PRESET_ID ? "custom" : id
+}
 
 export async function saveLlmConfig(config: LlmConfig): Promise<void> {
   const store = await getStore()
@@ -48,7 +91,13 @@ export async function saveLlmConfig(config: LlmConfig): Promise<void> {
 
 export async function loadLlmConfig(): Promise<LlmConfig | null> {
   const store = await getStore()
-  return (await store.get<LlmConfig>(LLM_CONFIG_KEY)) ?? null
+  const saved = await store.get<LegacyLlmConfig>(LLM_CONFIG_KEY)
+  if (!saved) return null
+  const migrated = migrateLlmConfig(saved)
+  if (migrated.provider !== saved.provider || saved.showCacheHitRate != null) {
+    await store.set(LLM_CONFIG_KEY, migrated)
+  }
+  return migrated
 }
 
 export async function saveProviderConfigs(configs: ProviderConfigs): Promise<void> {
@@ -58,7 +107,13 @@ export async function saveProviderConfigs(configs: ProviderConfigs): Promise<voi
 
 export async function loadProviderConfigs(): Promise<ProviderConfigs | null> {
   const store = await getStore()
-  return (await store.get<ProviderConfigs>(PROVIDER_CONFIGS_KEY)) ?? null
+  const saved = await store.get<ProviderConfigs>(PROVIDER_CONFIGS_KEY)
+  if (!saved) return null
+  const migrated = migrateProviderConfigs(saved)
+  if (saved[DEEPSEEK_PRESET_ID]) {
+    await store.set(PROVIDER_CONFIGS_KEY, migrated)
+  }
+  return migrated
 }
 
 export async function saveActivePresetId(id: string | null): Promise<void> {
@@ -68,7 +123,12 @@ export async function saveActivePresetId(id: string | null): Promise<void> {
 
 export async function loadActivePresetId(): Promise<string | null> {
   const store = await getStore()
-  return (await store.get<string | null>(ACTIVE_PRESET_KEY)) ?? null
+  const saved = await store.get<string | null>(ACTIVE_PRESET_KEY) ?? null
+  const migrated = migrateActivePresetId(saved)
+  if (migrated !== saved) {
+    await store.set(ACTIVE_PRESET_KEY, migrated)
+  }
+  return migrated
 }
 
 const SEARCH_API_KEY = "searchApiConfig"

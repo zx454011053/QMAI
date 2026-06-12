@@ -129,7 +129,6 @@ function PresetRow({
   const baseUrl = ov.baseUrl ?? preset.baseUrl ?? ""
   const context = ov.maxContextSize ?? preset.suggestedContextSize ?? 131072
   const reasoning = ov.reasoning ?? { mode: "auto" as const }
-  const showCacheHitRate = ov.showCacheHitRate ?? false
   const hasConfig = !!apiKey || !!ov.baseUrl || !!ov.model
   // Local CLI providers authenticate via their own existing login state
   // (inherited by the spawned subprocess), so no API key field is shown.
@@ -395,43 +394,6 @@ function PresetRow({
               onChange={(v) => onChange({ maxContextSize: v })}
             />
           </div>
-
-          {preset.provider === "deepseek" && (
-            <div className="space-y-2">
-              <Label>缓存命中率显示</Label>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => onChange({ showCacheHitRate: !showCacheHitRate })}
-                  className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full border transition-colors ${
-                    showCacheHitRate
-                      ? "border-primary bg-primary"
-                      : "border-muted-foreground/30 bg-muted-foreground/20 hover:bg-muted-foreground/30"
-                  }`}
-                >
-                  <span
-                    className={`inline-block h-3.5 w-3.5 rounded-full bg-white shadow-sm ring-1 ring-black/10 transition-transform ${
-                      showCacheHitRate ? "translate-x-4" : "translate-x-0.5"
-                    }`}
-                  />
-                </button>
-                <span className="text-xs text-muted-foreground">
-                  {showCacheHitRate ? "开启 — 在回复下方显示缓存命中率" : "关闭"}
-                </span>
-              </div>
-              <p className="text-xs text-muted-foreground">
-                开启后，每次对话完成时将显示提示缓存命中率（仅 DeepSeek 支持）。参考{" "}
-                <a
-                  href="https://api-docs.deepseek.com/zh-cn/guides/kv_cache"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-primary underline underline-offset-2 hover:opacity-80"
-                >
-                  DeepSeek 上下文硬盘缓存文档
-                </a>
-              </p>
-            </div>
-          )}
 
           <ReasoningControls
             value={reasoning}

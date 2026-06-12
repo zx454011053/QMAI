@@ -9,7 +9,7 @@ import type { ReasoningConfig, SourceWatchConfig, RevisionFeedbackWindowConfig, 
  */
 export interface SettingsDraft {
   // LLM provider
-  provider: "openai" | "anthropic" | "google" | "ollama" | "custom" | "minimax" | "claude-code" | "codex-cli" | "deepseek"
+  provider: "openai" | "anthropic" | "google" | "ollama" | "custom" | "minimax" | "claude-code" | "codex-cli"
   apiKey: string
   model: string
   ollamaUrl: string
@@ -17,9 +17,6 @@ export interface SettingsDraft {
   maxContextSize: number
   apiMode: CustomApiMode | undefined
   reasoning: ReasoningConfig | undefined
-
-  // DeepSeek cache hit rate display
-  showCacheHitRate: boolean
 
   // Embedding
   embeddingEnabled: boolean
@@ -36,7 +33,7 @@ export interface SettingsDraft {
   // Multimodal (image captioning at ingest time)
   multimodalEnabled: boolean
   multimodalUseMainLlm: boolean
-  multimodalProvider: "openai" | "anthropic" | "google" | "ollama" | "custom" | "minimax" | "claude-code" | "codex-cli" | "deepseek"
+  multimodalProvider: "openai" | "anthropic" | "google" | "ollama" | "custom" | "minimax" | "claude-code" | "codex-cli"
   multimodalApiKey: string
   multimodalModel: string
   multimodalOllamaUrl: string

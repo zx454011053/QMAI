@@ -44,7 +44,6 @@ export function ChatMessage({ message, isLastAssistant, onRegenerate, novelMode,
   const isUser = message.role === "user"
   const isSystem = message.role === "system"
   const isAssistant = message.role === "assistant"
-  const showCacheHitRate = useWikiStore((s) => s.llmConfig.showCacheHitRate ?? false)
   const [hovered, setHovered] = useState(false)
 
   return (
@@ -83,7 +82,7 @@ export function ChatMessage({ message, isLastAssistant, onRegenerate, novelMode,
           )}
         </div>
         {isAssistant && !message.discarded && <CitedReferencesPanel content={message.content} savedReferences={message.references} />}
-        {isAssistant && !message.discarded && showCacheHitRate && message.usage && (
+        {isAssistant && !message.discarded && message.usage && (
           <CacheHitRateBadge usage={message.usage} />
         )}
         {isAssistant && !message.discarded && (
@@ -168,7 +167,7 @@ function CacheHitRateBadge({ usage }: { usage: UsageInfo }) {
   return (
     <p
       className="text-[11px] text-muted-foreground"
-      title="DeepSeek 上下文硬盘缓存命中率。重复前缀会从缓存读取，计入 prompt_cache_hit_tokens。"
+      title="提示缓存命中率。重复前缀会从缓存读取，计入 prompt_cache_hit_tokens。"
     >
       {label}
     </p>

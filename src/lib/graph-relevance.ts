@@ -46,7 +46,7 @@ const TYPE_AFFINITY: Record<string, Record<string, number>> = {
 // Module-level cache
 // ---------------------------------------------------------------------------
 
-let cachedGraph: RetrievalGraph | null = null
+const graphCache = new Map<string, Promise<RetrievalGraph>>()
 
 // ---------------------------------------------------------------------------
 // Helpers (pure)
@@ -158,19 +158,31 @@ export async function buildRetrievalGraph(
   projectPath: string,
   dataVersion: number = 0,
 ): Promise<RetrievalGraph> {
-  // Return cached if version matches
-  if (cachedGraph !== null && cachedGraph.dataVersion === dataVersion) {
-    return cachedGraph
+  const normalizedProjectPath = normalizePath(projectPath)
+  const cacheKey = `${normalizedProjectPath}:${dataVersion}`
+  const cached = graphCache.get(cacheKey)
+  if (cached) {
+    return cached
   }
 
-  const wikiRoot = `${normalizePath(projectPath)}/wiki`
+  const graphPromise = buildRetrievalGraphForProject(normalizedProjectPath, dataVersion).catch((error) => {
+    graphCache.delete(cacheKey)
+    throw error
+  })
+  graphCache.set(cacheKey, graphPromise)
+  return graphPromise
+}
+
+async function buildRetrievalGraphForProject(
+  projectPath: string,
+  dataVersion: number,
+): Promise<RetrievalGraph> {
+  const wikiRoot = `${projectPath}/wiki`
   let tree: FileNode[]
   try {
     tree = await listDirectory(wikiRoot)
   } catch {
-    const emptyGraph: RetrievalGraph = { nodes: new Map(), dataVersion }
-    cachedGraph = emptyGraph
-    return emptyGraph
+    return { nodes: new Map(), dataVersion }
   }
 
   const mdFiles = flattenMdFiles(tree)
@@ -245,7 +257,6 @@ export async function buildRetrievalGraph(
   }
 
   const graph: RetrievalGraph = { nodes, dataVersion }
-  cachedGraph = graph
   return graph
 }
 
@@ -313,5 +324,5 @@ export function getRelatedNodes(
 }
 
 export function clearGraphCache(): void {
-  cachedGraph = null
+  graphCache.clear()
 }

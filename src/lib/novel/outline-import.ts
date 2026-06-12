@@ -27,6 +27,12 @@ export const OUTLINE_IMPORT_EXTENSIONS = [
 
 const OUTLINE_IMPORT_EXTENSION_SET = new Set<string>(OUTLINE_IMPORT_EXTENSIONS)
 
+export interface OutlineImportCandidate {
+  path: string
+  name: string
+  targetFolders: string[]
+}
+
 function yamlEscape(value: string): string {
   return value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')
 }
@@ -133,6 +139,24 @@ function collectImportableFiles(nodes: readonly FileNode[]): FileNode[] {
   return files
 }
 
+export async function collectOutlineImportCandidatesFromFolder(selectedFolder: string): Promise<OutlineImportCandidate[]> {
+  const normalizedFolder = normalizePath(selectedFolder)
+  const rootFolderName = getFileName(normalizedFolder) || "imported-outline"
+  const tree = await listDirectory(normalizedFolder)
+  const sourceFiles = collectImportableFiles(tree)
+
+  return sourceFiles.map((sourceFile) => {
+    const relativePath = getRelativePath(normalizePath(sourceFile.path), normalizedFolder)
+    const segments = relativePath.split("/").filter(Boolean)
+    segments.pop()
+    return {
+      path: normalizePath(sourceFile.path),
+      name: sourceFile.name,
+      targetFolders: [rootFolderName, ...segments],
+    }
+  })
+}
+
 export async function importOutlineFiles(projectPath: string, sourcePaths: string[]): Promise<string[]> {
   const importedPaths: string[] = []
 
@@ -148,25 +172,25 @@ export async function importOutlineFiles(projectPath: string, sourcePaths: strin
   return importedPaths
 }
 
-export async function importOutlineFolder(projectPath: string, selectedFolder: string): Promise<string[]> {
-  const normalizedFolder = normalizePath(selectedFolder)
-  const rootFolderName = getFileName(normalizedFolder) || "imported-outline"
-  const tree = await listDirectory(normalizedFolder)
-  const sourceFiles = collectImportableFiles(tree)
+export async function importOutlineCandidates(
+  projectPath: string,
+  candidates: readonly OutlineImportCandidate[],
+): Promise<string[]> {
   const importedPaths: string[] = []
 
-  for (const sourceFile of sourceFiles) {
-    const relativePath = getRelativePath(normalizePath(sourceFile.path), normalizedFolder)
-    const segments = relativePath.split("/").filter(Boolean)
-    segments.pop()
-
+  for (const candidate of candidates) {
     try {
-      const importedPath = await importSingleOutlineFile(projectPath, sourceFile.path, [rootFolderName, ...segments])
+      const importedPath = await importSingleOutlineFile(projectPath, candidate.path, candidate.targetFolders)
       if (importedPath) importedPaths.push(importedPath)
     } catch (error) {
-      console.error("[outline-import] failed to import folder file:", sourceFile.path, error)
+      console.error("[outline-import] failed to import folder file:", candidate.path, error)
     }
   }
 
   return importedPaths
+}
+
+export async function importOutlineFolder(projectPath: string, selectedFolder: string): Promise<string[]> {
+  const candidates = await collectOutlineImportCandidatesFromFolder(selectedFolder)
+  return importOutlineCandidates(projectPath, candidates)
 }

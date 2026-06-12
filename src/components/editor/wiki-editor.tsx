@@ -10,10 +10,12 @@ import { Milkdown, MilkdownProvider, useEditor } from "@milkdown/react"
 import "@milkdown/theme-nord/style.css"
 import "katex/dist/katex.min.css"
 import { Pencil, Eye } from "lucide-react"
+import { formatChapterWriting } from "@/lib/chapter-formatting"
 import { parseFrontmatter } from "@/lib/frontmatter"
 import { FrontmatterPanel } from "@/components/editor/frontmatter-panel"
 import { WikiReader } from "@/components/editor/wiki-reader"
 import {
+  rebuildChapterBody,
   splitChapterHeading,
   type ChapterBodySelection,
   type ChapterSelectionAction,
@@ -61,6 +63,15 @@ function WritingTextarea({
     if (contentEpochRef.current === contentEpoch) return
     contentEpochRef.current = contentEpoch
     const { heading: h, body: b } = splitChapterHeading(content)
+    if (document.activeElement === textareaRef.current) {
+      const normalizedDraft = splitChapterHeading(formatChapterWriting(rebuildChapterBody(heading, value)))
+      if (normalizedDraft.heading === h && normalizedDraft.body === b && (heading !== h || value !== b)) {
+        previousBodyRef.current = value
+        return
+      }
+    }
+    const previousBody = previousBodyRef.current
+    previousBodyRef.current = b
     setHeading(h)
     setValue(b)
     setSelection(null)
@@ -78,6 +89,51 @@ function WritingTextarea({
   const rebuild = useCallback((h: string, b: string) => {
     onSave(h ? `# ${h}\n\n${b}` : b)
   }, [onSave])
+
+  const resize = useMemo(
+    () => () => {
+      const el = textareaRef.current
+      if (!el) return
+      el.style.height = "auto"
+      el.style.height = `${el.scrollHeight}px`
+    },
+    [],
+  )
+
+  useEffect(() => {
+    resize()
+  }, [value, resize])
+
+  useEffect(() => {
+    const el = textareaRef.current
+    if (!el) return
+    const resizeTarget = el.parentElement ?? el
+    let frame: number | null = null
+
+    const scheduleResize = () => {
+      if (frame !== null) cancelAnimationFrame(frame)
+      frame = requestAnimationFrame(() => {
+        frame = null
+        resize()
+      })
+    }
+
+    scheduleResize()
+    if (typeof ResizeObserver === "undefined") {
+      window.addEventListener("resize", scheduleResize)
+      return () => {
+        if (frame !== null) cancelAnimationFrame(frame)
+        window.removeEventListener("resize", scheduleResize)
+      }
+    }
+
+    const observer = new ResizeObserver(scheduleResize)
+    observer.observe(resizeTarget)
+    return () => {
+      if (frame !== null) cancelAnimationFrame(frame)
+      observer.disconnect()
+    }
+  }, [resize])
 
   const refreshSelection = useCallback(() => {
     const el = textareaRef.current
@@ -218,8 +274,12 @@ function WritingTextarea({
             target.selectionEnd = caret
           })
         }}
-        className="chapter-writing-textarea block w-full resize-none overflow-y-auto border-0 bg-transparent p-0 text-lg leading-8 text-foreground outline-none"
-        style={{ fontFamily: "inherit", minHeight: "calc(100vh - 16rem)" }}
+        className="w-full resize-none overflow-hidden border-0 bg-transparent p-0 text-lg leading-8 text-foreground outline-none"
+        style={{
+          fontFamily: "inherit",
+          minHeight: "100%",
+          height: "auto"
+        }}
         spellCheck={false}
       />
     </div>
@@ -327,7 +387,7 @@ export function WikiEditor({
   const effectiveMode = immersiveWriting ? "edit" : mode
 
   return (
-    <div className="relative h-full overflow-auto">
+    <div className={immersiveWriting ? "relative h-full overflow-hidden" : "relative h-full overflow-auto"}>
       {!immersiveWriting && (
         <button
           type="button"

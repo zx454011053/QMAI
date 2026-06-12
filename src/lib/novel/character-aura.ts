@@ -43,6 +43,7 @@ export interface CharacterAuraBinding {
 export interface BuildCharacterAuraContextOptions {
   fallbackAuraId?: string
   previewMode?: "context" | "writing"
+  matchingText?: string
 }
 
 export interface CharacterAuraStore {
@@ -495,12 +496,13 @@ export async function buildCharacterAuraContext(
   const store = await loadCharacterAuraStore(projectPath)
   if (store.bindings.length === 0) return ""
   const allAuras = [...BUILT_IN_CHARACTER_AURAS, ...store.customAuras]
-  const normalizedTask = normalizeCharacterText(task)
-  const tokens = new Set(task.split(/[\s，。、『』《》：:；;,.!?！？\-]+/).filter(Boolean))
+  const matchingText = [task, options.matchingText ?? ""].filter(Boolean).join("\n")
+  const normalizedTask = normalizeCharacterText(matchingText)
+  const tokens = new Set(matchingText.split(/[\s，。、『』《》：:；;,.!?！？\-]+/).filter(Boolean))
   const matched = store.bindings.filter((binding) => {
     const normalizedName = normalizeCharacterText(binding.characterName)
     return (
-      task.includes(binding.characterName)
+      matchingText.includes(binding.characterName)
       || tokens.has(binding.characterName)
       || (normalizedName.length > 0 && normalizedTask.includes(normalizedName))
     )

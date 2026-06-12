@@ -20,7 +20,7 @@ export {
 } from "./prompt-config-defaults"
 export { snapshotToGraphNodes, snapshotToGraphEdges, writeSnapshotToWiki, writePatchFieldsToWiki, detectNodeType, NOVEL_NODE_TYPE_LABELS, NOVEL_RELATION_LABELS, type NovelGraphNode, type NovelGraphEdge, type NovelNodeType } from "./graph-adapter"
 export { emptyCognitionState, mergeCognitionFromSnapshot, loadCognitionState, saveCognitionState, cognitionToContextText, type CharacterCognition, type CognitionState } from "./character-cognition"
-export { getNextChapterNumber, extractChapterNumber, flattenMdFiles } from "./chapter-utils"
+export { getNextChapterNumber, resolveTargetChapterNumberForChat, extractChapterNumber, flattenMdFiles, type ResolveTargetChapterNumberForChatInput } from "./chapter-utils"
 export {
   createEmptyCharacterStateStore,
   saveCharacterStates,
@@ -40,7 +40,8 @@ export {
 export { exportProject, type ExportOptions, type ExportResult } from "./export"
 export { routeTask, buildTaskDirective, type NovelTaskIntent, type TaskRouteResult } from "./task-router"
 export { createDefaultNovelProjectMeta, saveNovelProjectMeta, loadNovelProjectMeta, updateNovelProjectStats, type NovelProjectMeta } from "./project-meta"
-export { buildDeAiSystemPrompt, buildDeAiRewriteMessages, injectDeAiDirective } from "./de-ai-adapter"
+export { buildDeAiSystemPrompt, buildDeAiRewriteMessages, injectDeAiDirective, loadCustomDeAiSkill } from "./de-ai-adapter"
+export { analyzePreviousChapters, type PreviousChapterAnalysis } from "./previous-chapters-analysis"
 export { rebuildAllSnapshots, rebuildVectorIndex, type RebuildProgress, type RebuildProgressCallback } from "./rebuild"
 export { runFactCheck, verifyFactCheckLlm, type FactCheckResult, type FactCheckReport, type FactCheckOptions } from "./fact-snapshot"
 export { scoreReviewResults, CALIBRATED_DIMENSION_WEIGHTS, CALIBRATED_SEVERITY_DEDUCTION, type DimensionScore, type ReviewScoreReport, type ReviewScoringOptions } from "./review-scoring"

@@ -23,6 +23,17 @@ import { isTauri } from "@/lib/platform"
 let pluginFetchPromise: Promise<typeof globalThis.fetch> | null = null
 
 /**
+ * True when running outside a browser / webview (vitest, SSR, any
+ * Node-based tooling). The Tauri plugin is importable in Node
+ * (resolution succeeds) but its internals reach for `window` at call
+ * time, so we must avoid invoking it — guard BEFORE the dynamic
+ * import rather than trying to .catch() an error that happens later.
+ */
+const isNodeEnv = typeof window === "undefined"
+const isTauriEnv = (): boolean =>
+  typeof window !== "undefined" && "__TAURI_INTERNALS__" in window
+
+/**
  * Returns a fetch function that routes through Tauri's HTTP plugin in
  * production, falling back to the platform's native fetch in non-Tauri
  * environments (tests / SSR / storybook / plain browser). Call this once
@@ -35,7 +46,7 @@ let pluginFetchPromise: Promise<typeof globalThis.fetch> | null = null
  */
 export function getHttpFetch(): Promise<typeof globalThis.fetch> {
   if (!pluginFetchPromise) {
-    if (typeof window === "undefined" || !isTauri()) {
+    if (isNodeEnv || !isTauriEnv()) {
       // Bind so `this === globalThis` — Node's fetch requires it.
       pluginFetchPromise = Promise.resolve(globalThis.fetch.bind(globalThis))
     } else {
@@ -45,6 +56,10 @@ export function getHttpFetch(): Promise<typeof globalThis.fetch> {
     }
   }
   return pluginFetchPromise
+}
+
+export function resetHttpFetchForTests(): void {
+  pluginFetchPromise = null
 }
 
 /**
@@ -69,6 +84,8 @@ export function isFetchNetworkError(err: unknown): boolean {
   if (err.message === "Load failed") return true
   // Chromium mid-stream drop
   if (err.message === "Failed to fetch") return true
+  // Tauri plugin-http / Rust reqwest send-stage failure
+  if (/error sending request for url/i.test(err.message)) return true
   if (err.message.includes("network error")) return true
   return false
 }

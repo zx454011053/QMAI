@@ -5,7 +5,7 @@ import { useReviewStore } from "@/stores/review-store"
 import { isTauri, pickDirectory } from "@/lib/platform"
 import { useChatStore } from "@/stores/chat-store"
 import { listDirectory, openProject, fileExists } from "@/commands/fs"
-import { getLastProject, getRecentProjects, saveLastProject, loadLlmConfig, loadLanguage, loadEmbeddingConfig, loadProviderConfigs, loadActivePresetId, loadProxyConfig, loadClipServerConfig, loadScheduledImportConfig, saveScheduledImportConfig, loadSourceWatchConfig, loadNovelMode, loadNovelConfig, loadRevisionFeedbackWindowConfig, loadTheme, saveLlmConfig } from "@/lib/project-store"
+import { getLastProject, getRecentProjects, saveLastProject, loadLlmConfig, loadAiChatModel, loadLanguage, loadEmbeddingConfig, loadProviderConfigs, loadActivePresetId, loadProxyConfig, loadClipServerConfig, loadScheduledImportConfig, saveScheduledImportConfig, loadSourceWatchConfig, loadNovelMode, loadNovelConfig, loadRevisionFeedbackWindowConfig, loadTheme, saveLlmConfig, saveProviderConfigs, saveActivePresetId } from "@/lib/project-store"
 import { loadNovelProjectMeta } from "@/lib/novel/project-meta"
 import { loadProjectPromptConfig } from "@/lib/novel/prompt-config-storage"
 import { loadLlmUsageRecords } from "@/lib/llm-usage-storage"
@@ -24,6 +24,7 @@ import { formatAppTitle } from "@/lib/app-title"
 import { resetProjectState, resetProjectStores } from "@/lib/reset-project-state"
 import { LLM_PRESETS } from "@/components/settings/llm-presets"
 import { resolveConfig } from "@/components/settings/preset-resolver"
+import { loadEnvLlmDefault } from "@/lib/env-llm-defaults"
 import type { WikiProject } from "@/types/wiki"
 
 function App() {
@@ -59,13 +60,24 @@ function App() {
           }
         }
 
+        const envLlmDefault = loadEnvLlmDefault()
         const savedConfig = await loadLlmConfig()
         if (savedConfig) {
           useWikiStore.getState().setLlmConfig(savedConfig)
+        } else if (envLlmDefault) {
+          useWikiStore.getState().setLlmConfig(envLlmDefault.config)
+          await saveLlmConfig(envLlmDefault.config)
+        }
+        const savedAiChatModel = await loadAiChatModel()
+        if (savedAiChatModel) {
+          useWikiStore.getState().setAiChatModel(savedAiChatModel)
         }
         const savedProviderConfigs = await loadProviderConfigs()
         if (savedProviderConfigs) {
           useWikiStore.getState().setProviderConfigs(savedProviderConfigs)
+        } else if (envLlmDefault) {
+          useWikiStore.getState().setProviderConfigs(envLlmDefault.providerConfigs)
+          await saveProviderConfigs(envLlmDefault.providerConfigs)
         }
         const savedActivePreset = await loadActivePresetId()
         if (savedActivePreset) {
@@ -85,6 +97,9 @@ function App() {
             useWikiStore.getState().setLlmConfig(resolved)
             await saveLlmConfig(resolved)
           }
+        } else if (envLlmDefault) {
+          useWikiStore.getState().setActivePresetId(envLlmDefault.activePresetId)
+          await saveActivePresetId(envLlmDefault.activePresetId)
         }
         const savedEmbeddingConfig = await loadEmbeddingConfig()
         if (savedEmbeddingConfig) {

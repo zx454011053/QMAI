@@ -1,6 +1,7 @@
 import { readFile } from "@/commands/fs"
 import { normalizePath } from "@/lib/path-utils"
 import { listSnapshots, loadSnapshot, type ChapterSnapshot } from "./chapter-ingest"
+import { loadDismantlingLibrary } from "./dismantling"
 
 export interface MemoryCenterGroup {
   title: string
@@ -46,10 +47,21 @@ export interface MemoryCenterStats {
   memoryFileCount: number
 }
 
+export interface MemoryCenterDismantlingProjectPreview {
+  id: string
+  title: string
+  chapterCount: number
+  analysisCount: number
+  structureMemoryCount: number
+  useInChat: boolean
+  structureMemory: string[]
+}
+
 export interface MemoryCenterData {
   stats: MemoryCenterStats
   snapshots: MemoryCenterSnapshotCard[]
   files: MemoryCenterFilePreview[]
+  dismantlingProjects: MemoryCenterDismantlingProjectPreview[]
 }
 
 const MEMORY_FILE_CONFIGS = [
@@ -281,9 +293,21 @@ export async function loadMemoryCenterData(projectPath: string): Promise<MemoryC
     )
   ).filter(isMemoryCenterFilePreview)
 
+  const dismantlingLibrary = await loadDismantlingLibrary(pp).catch(() => ({ version: 1 as const, projects: [], selectedProjectId: null }))
+  const dismantlingProjects = dismantlingLibrary.projects.map((project) => ({
+    id: project.id,
+    title: project.title,
+    chapterCount: project.chapters.length,
+    analysisCount: project.analyses.length,
+    structureMemoryCount: project.structureMemory.length,
+    useInChat: Boolean(project.useInChat),
+    structureMemory: project.structureMemory.slice(0, 5),
+  }))
+
   return {
     stats: buildMemoryCenterStats(allSnapshotCards, files),
     snapshots: allSnapshotCards.slice(0, RECENT_SNAPSHOT_CARD_LIMIT),
     files,
+    dismantlingProjects,
   }
 }

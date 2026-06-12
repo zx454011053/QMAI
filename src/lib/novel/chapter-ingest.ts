@@ -3,7 +3,7 @@ import { normalizePath } from "@/lib/path-utils"
 import { useWikiStore } from "@/stores/wiki-store"
 import { parseFrontmatter } from "@/lib/frontmatter"
 import { isChapterPage, isFinalChapter, parseChapterNumber } from "./chapter-meta"
-import { streamChat, type StreamCallbacks } from "@/lib/llm-client"
+import { DEFAULT_LLM_REQUEST_TIMEOUT_MS, streamChat, type StreamCallbacks } from "@/lib/llm-client"
 import type { ChatMessage } from "@/lib/llm-providers"
 import { getOutputLanguage, buildLanguageReminder } from "@/lib/output-language"
 import type { LlmConfig } from "@/stores/wiki-store"
@@ -901,12 +901,16 @@ async function loadValidMemorySnapshots(
 
 export async function exportStructuredMemoryToWiki(projectPath: string, snapshot: ChapterSnapshot): Promise<string[]> {
   const pp = normalizePath(projectPath)
-  const memoryDir = `${pp}/wiki/memory`
   const snapshots = await loadValidMemorySnapshots(pp, snapshot)
   if (snapshots.length === 0) {
     return []
   }
+  return writeStructuredMemoryDocuments(pp, snapshots)
+}
 
+async function writeStructuredMemoryDocuments(projectPath: string, snapshots: ChapterSnapshot[]): Promise<string[]> {
+  const pp = normalizePath(projectPath)
+  const memoryDir = `${pp}/wiki/memory`
   const memoryDocuments = buildStructuredMemoryDocuments(snapshots)
 
   await createDirectory(memoryDir)
@@ -1179,7 +1183,6 @@ async function syncForeshadowingChanges(projectPath: string, snapshot: ChapterSn
 
 async function rebuildDerivedMemoryFromSnapshots(projectPath: string, latestSnapshot?: ChapterSnapshot): Promise<void> {
   const snapshots = await loadValidMemorySnapshots(projectPath, latestSnapshot)
-  if (snapshots.length === 0) return
 
   const cognitionState = snapshots.reduce(
     (state, snapshot) => mergeCognitionFromSnapshot(state, snapshot),
@@ -1199,7 +1202,7 @@ async function rebuildDerivedMemoryFromSnapshots(projectPath: string, latestSnap
   }
   await saveForeshadowingTracker(projectPath, foreshadowingStore)
 
-  await exportStructuredMemoryToWiki(projectPath, snapshots[snapshots.length - 1])
+  await writeStructuredMemoryDocuments(projectPath, snapshots)
 }
 
 async function saveSnapshot(projectPath: string, snapshot: ChapterSnapshot): Promise<void> {
@@ -1366,6 +1369,9 @@ export async function deleteChapterSnapshots(projectPath: string, chapterNumber:
   try { if (await fileExists(jsonPath)) await deleteFile(jsonPath) } catch { /* ignore */ }
   try { if (await fileExists(mdPath)) await deleteFile(mdPath) } catch { /* ignore */ }
   try { if (await fileExists(historyDir)) await deleteFile(historyDir) } catch { /* ignore */ }
+  await rebuildDerivedMemoryFromSnapshots(pp)
+  clearGraphCache()
+  useWikiStore.getState().bumpDataVersion()
 }
 
 export async function ingestOutline(

@@ -18,6 +18,10 @@ export interface NovelReviewResult {
   suggestion: string
 }
 
+export interface NovelReviewCallbacks {
+  onThinking?: (content: string) => void
+}
+
 const REVIEW_DIMENSIONS = [
   "是否违背总大纲",
   "是否违背分卷大纲",
@@ -38,8 +42,30 @@ const REVIEW_DIMENSIONS = [
   "是否缺少章节钩子",
 ]
 
+const REVIEW_STAGES = [
+  "阶段1：审查任务识别",
+  "阶段2：上下文检索",
+  "阶段3：章节目标对齐",
+  "阶段4：事实与记忆核对",
+  "阶段5：逐维度审查",
+  "阶段6：阻断判定",
+  "阶段7：二次复核",
+]
+
 export function buildReviewPrompt(pack: ContextPack, chapterContent: string): string {
   return `${contextPackToPrompt(pack)}
+
+阶段式深度审查工作流：
+${REVIEW_STAGES.map((stage) => `- ${stage}：必须使用高级 thinking，先分析证据，再给结论。`).join("\n")}
+
+阶段要求：
+1. 审查任务识别：确认目标章节、章纲节点、正文范围、是否缺少必要上下文。
+2. 上下文检索：结合大纲、节点、上一章结尾、下一章建议、记忆库、人物信息、伏笔、时间线、角色认知状态。
+3. 章节目标对齐：判断正文是否完成本章必须推进项，是否偏离章纲或反向推进。
+4. 事实与记忆核对：逐项对照已登记设定、人物认知、伏笔状态、历史事件和相关检索结果。
+5. 逐维度审查：每个维度都必须有 pass 或 issue，不要只检查明显错误。
+6. 阻断判定：把会影响正式章节保存、后续生成、主线事实或人物一致性的问题标为 error。
+7. 二次复核：删除没有正文证据或没有记忆/大纲依据的主观评价，补上遗漏的阻断问题。
 
 ${i18n.t("novel.reviewPrompt.reviewChapterInstruction")}
 ${REVIEW_DIMENSIONS.map((key, i) => `${i + 1}. ${i18n.t(key)}`).join("\n")}
@@ -71,7 +97,10 @@ export async function reviewChapter(
   projectPath: string,
   chapterContent: string,
   chapterNumber?: number,
+  callbacks: NovelReviewCallbacks = {},
+  signal?: AbortSignal,
 ): Promise<NovelReviewResult[]> {
+  if (signal?.aborted) throw new Error("已停止生成")
   const llmConfig = resolveNovelModel(
     useWikiStore.getState().llmConfig,
     useWikiStore.getState().novelConfig,
@@ -88,49 +117,82 @@ export async function reviewChapter(
     chapterNumber,
   )
 
+  if (signal?.aborted) throw new Error("已停止生成")
   const outputLang = getOutputLanguage()
   const langReminder = buildLanguageReminder(outputLang)
 
   const systemPrompt = `你是一个专业的小说审稿编辑。你的任务是检查章节内容是否存在连贯性问题。
-请严格按照 JSON 数组格式输出检查结果，不要输出任何其他内容。
+前置阶段请输出审查分析摘要；只有用户明确要求“最终审查 JSON”时，才严格按照 JSON 数组格式输出检查结果，不要输出任何其他内容。
 ${langReminder}`
 
   const userPrompt = buildReviewPrompt(contextPack, chapterContent)
+  const stageThinking = new Map<string, string>()
 
   try {
-    const messages: ChatMessage[] = [
-      { role: "system", content: systemPrompt },
-      { role: "user", content: userPrompt },
-    ]
-
-    let result = ""
-    const callbacks: StreamCallbacks = {
-      onToken: (token: string) => {
-        result += token
-      },
-      onDone: () => {},
-      onError: (error: Error) => {
-        console.error("[Novel Review] Stream error:", error)
-      },
-    }
-
-    await streamChat(
+    const stageOne = await runReviewStage(
       llmConfig,
-      messages,
+      systemPrompt,
+      buildStagePrompt(userPrompt, "阶段1：审查任务识别", "阶段2：上下文检索", "请输出审查任务书和已读取上下文摘要，不要输出最终 JSON。"),
+      "阶段1：审查任务识别 / 阶段2：上下文检索",
       callbacks,
-      AbortSignal.timeout(120000),
-      undefined,
-      buildLlmUsageTracking(
-        normalizePath(projectPath),
-        chapterNumber != null ? `章节审稿（第${chapterNumber}章）` : "章节审稿",
-      ),
+      stageThinking,
+      signal,
+    )
+    const stageTwo = await runReviewStage(
+      llmConfig,
+      systemPrompt,
+      buildStagePrompt(userPrompt, "阶段3：章节目标对齐", "阶段4：事实与记忆核对", "请重点核对章纲节点、上下文、记忆库、人物认知、伏笔和时间线，不要输出最终 JSON。"),
+      "阶段3：章节目标对齐 / 阶段4：事实与记忆核对",
+      callbacks,
+      stageThinking,
+      signal,
+    )
+    const stageThree = await runReviewStage(
+      llmConfig,
+      systemPrompt,
+      buildStagePrompt(userPrompt, "阶段5：逐维度审查", "阶段6：阻断判定", "请逐维度列出 pass 或 issue，并区分 error、warning、info，不要输出最终 JSON。"),
+      "阶段5：逐维度审查 / 阶段6：阻断判定",
+      callbacks,
+      stageThinking,
+      signal,
+    )
+
+    const result = await runReviewStage(
+      llmConfig,
+      systemPrompt,
+      [
+        userPrompt,
+        "",
+        "前置阶段分析：",
+        stageOne,
+        "",
+        stageTwo,
+        "",
+        stageThree,
+        "",
+        "阶段7：二次复核",
+        "请删除没有正文证据、没有上下文依据或只是主观评价的问题；补上遗漏的阻断问题。",
+        "",
+        "最终审查 JSON：",
+        "只输出最终 JSON 数组，不要输出解释、标题或 markdown。",
+      ].join("\n"),
+      "阶段7：二次复核",
+      callbacks,
+      stageThinking,
+      signal,
     )
 
     const jsonMatch = result.match(/\[[\s\S]*\]/)
-    if (!jsonMatch) return []
+    if (!jsonMatch) {
+      console.warn("[Novel Review] No JSON array found in result:", result.slice(0, 500))
+      return []
+    }
 
     const parsed = JSON.parse(jsonMatch[0])
-    if (!Array.isArray(parsed)) return []
+    if (!Array.isArray(parsed)) {
+      console.warn("[Novel Review] Parsed result is not an array:", parsed)
+      return []
+    }
 
     return parsed.map((item: Record<string, unknown>) => ({
       severity: validateSeverity(item.severity),
@@ -144,6 +206,99 @@ ${langReminder}`
     console.error("[Novel Review] Failed:", err)
     return []
   }
+}
+
+function buildStagePrompt(basePrompt: string, stageA: string, stageB: string, instruction: string): string {
+  return [
+    basePrompt,
+    "",
+    stageA,
+    stageB,
+    instruction,
+    "输出阶段分析即可，必须体现高级 thinking 的审查过程摘要：先列已核对依据，再列阶段结论。",
+  ].join("\n")
+}
+
+async function runReviewStage(
+  llmConfig: ReturnType<typeof resolveNovelModel>,
+  systemPrompt: string,
+  userPrompt: string,
+  stageTitle: string,
+  callbacks: NovelReviewCallbacks,
+  stageThinking: Map<string, string>,
+  signal?: AbortSignal,
+  retryCount = 0,
+): Promise<string> {
+  publishReviewStageThinking(stageThinking, callbacks, stageTitle, "正在分析...")
+  const messages: ChatMessage[] = [
+    { role: "system", content: systemPrompt },
+    { role: "user", content: userPrompt },
+  ]
+
+  let result = ""
+  const streamCallbacks: StreamCallbacks = {
+    onToken: (token: string) => {
+      result += token
+      publishReviewStageThinking(stageThinking, callbacks, stageTitle, result)
+    },
+    onDone: () => {},
+    onError: (error: Error) => {
+      console.error("[Novel Review] Stream error:", error)
+    },
+  }
+
+  const timeoutController = new AbortController()
+  const timeoutId = setTimeout(() => timeoutController.abort(), 300000)
+
+  const combinedSignal = signal
+    ? combineSignals(signal, timeoutController.signal)
+    : timeoutController.signal
+
+  try {
+    await streamChat(
+      llmConfig,
+      messages,
+      streamCallbacks,
+      combinedSignal,
+      { reasoning: { mode: "high" } },
+    )
+    clearTimeout(timeoutId)
+  } catch (err) {
+    clearTimeout(timeoutId)
+    if (signal?.aborted) throw new Error("已停止生成")
+    if (retryCount < 2) {
+      console.warn(`[Novel Review] Stage "${stageTitle}" failed, retrying (${retryCount + 1}/2)...`)
+      publishReviewStageThinking(stageThinking, callbacks, stageTitle, "网络波动，正在重试...")
+      await new Promise(resolve => setTimeout(resolve, 2000))
+      return runReviewStage(llmConfig, systemPrompt, userPrompt, stageTitle, callbacks, stageThinking, signal, retryCount + 1)
+    }
+    throw err
+  }
+
+  if (signal?.aborted) throw new Error("已停止生成")
+  return result.trim()
+}
+
+function combineSignals(signalA: AbortSignal, signalB: AbortSignal): AbortSignal {
+  const controller = new AbortController()
+  const abort = () => controller.abort()
+  signalA.addEventListener("abort", abort, { once: true })
+  signalB.addEventListener("abort", abort, { once: true })
+  return controller.signal
+}
+
+function publishReviewStageThinking(
+  stageThinking: Map<string, string>,
+  callbacks: NovelReviewCallbacks,
+  stageTitle: string,
+  content: string,
+): void {
+  stageThinking.set(stageTitle, formatReviewStageThinking(stageTitle, content))
+  callbacks.onThinking?.(Array.from(stageThinking.values()).join("\n\n"))
+}
+
+function formatReviewStageThinking(stageTitle: string, content: string): string {
+  return `## ${stageTitle}\n${content.trim()}`
 }
 
 function validateSeverity(value: unknown): "error" | "warning" | "info" {

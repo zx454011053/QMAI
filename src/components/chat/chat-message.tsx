@@ -22,6 +22,8 @@ import { findRawSourceForImage, imageUrlToAbsolute } from "@/lib/raw-source-reso
 import { detectLanguage } from "@/lib/detect-language"
 import { getHtmlLang, getTextDirection } from "@/lib/language-metadata"
 import { MermaidDiagram, unwrapMermaidPre } from "@/components/mermaid-diagram"
+import { canContinueUnfinishedDeepChapter } from "./chat-resume"
+import { getCopyableAssistantContent } from "@/lib/chat-copy-content"
 import { parseAgentResponse } from "@/lib/novel/agent-parser"
 import { separateThinking, stripThinkingBlocks } from "@/lib/thinking-content"
 import { ThinkingBlock } from "@/components/llm/thinking-block"
@@ -34,17 +36,22 @@ interface ChatMessageProps {
   novelMode?: boolean
   projectPath?: string | null
   onSaveAsChapter?: (content: string) => void
+  onContinueNextChapter?: () => void
+  onContinueUnfinished?: () => void
   onSaveAsDraft?: (content: string) => void
   onDiscardDraft?: () => void
   saveStatus?: string
   isSaving?: boolean
 }
 
-export function ChatMessage({ message, isLastAssistant, onRegenerate, novelMode, projectPath, onSaveAsChapter, saveStatus, isSaving }: ChatMessageProps) {
+export function ChatMessage({ message, isLastAssistant, onRegenerate, novelMode, projectPath, onSaveAsChapter, onContinueNextChapter, onContinueUnfinished, saveStatus, isSaving }: ChatMessageProps) {
   const isUser = message.role === "user"
   const isSystem = message.role === "system"
   const isAssistant = message.role === "assistant"
   const [hovered, setHovered] = useState(false)
+  const canResumeUnfinished = Boolean(
+    novelMode && isLastAssistant && onContinueUnfinished && canContinueUnfinishedDeepChapter(message.content),
+  )
 
   return (
     <div
@@ -87,6 +94,11 @@ export function ChatMessage({ message, isLastAssistant, onRegenerate, novelMode,
         )}
         {isAssistant && !message.discarded && (
           <div className="flex items-center gap-1 flex-wrap">
+            {canResumeUnfinished && (
+              <div className="basis-full rounded-md border border-amber-500/30 bg-amber-50/60 px-2 py-1.5 text-[11px] leading-5 text-amber-800 dark:bg-amber-950/20 dark:text-amber-300">
+                这次深度生成已经完成了部分思考过程。点击“继续未完成”会基于上方已有阶段继续往后生成，通常比“重新生成”更节省 token；如果前面的思考方向本身不对，再使用“重新生成”。
+              </div>
+            )}
             {novelMode && isLastAssistant && onSaveAsChapter && (
               <button
                 type="button"
@@ -95,6 +107,27 @@ export function ChatMessage({ message, isLastAssistant, onRegenerate, novelMode,
                 className="rounded border border-border px-2 py-0.5 text-[11px] text-foreground hover:bg-accent disabled:opacity-50"
               >
                 {isSaving ? "保存中..." : "保存到章节库"}
+              </button>
+            )}
+            {novelMode && isLastAssistant && onContinueNextChapter && (
+              <button
+                type="button"
+                onClick={onContinueNextChapter}
+                disabled={isSaving}
+                className="rounded border border-border px-2 py-0.5 text-[11px] text-foreground hover:bg-accent disabled:opacity-50"
+              >
+                继续生成下一章
+              </button>
+            )}
+            {canResumeUnfinished && (
+              <button
+                type="button"
+                onClick={onContinueUnfinished}
+                disabled={isSaving}
+                className="rounded border border-amber-500/40 bg-amber-50 px-2 py-0.5 text-[11px] text-amber-800 hover:bg-amber-100 disabled:opacity-50 dark:bg-amber-950/20 dark:text-amber-300 dark:hover:bg-amber-950/35"
+                title="基于已有思考过程继续生成，减少重复消耗"
+              >
+                继续未完成
               </button>
             )}
             {(hovered || (novelMode && isLastAssistant)) && (
@@ -124,9 +157,7 @@ function CopyButton({ content }: { content: string }) {
   const [copied, setCopied] = useState(false)
 
   const handleCopy = useCallback(async () => {
-    // Strip HTML comments and thinking blocks before copying
-    const clean = stripThinkingBlocks(content.replace(/<!--.*?-->/gs, "")).trim()
-
+    const clean = getCopyableAssistantContent(content)
     await navigator.clipboard.writeText(clean)
     setCopied(true)
     setTimeout(() => setCopied(false), 2000)
@@ -696,29 +727,71 @@ function MarkdownContent({ content }: { content: string }) {
   )
 }
 
-/** Streaming thinking: shows latest ~5 lines rolling upward with animation */
+/**
+ * Separate <think>...</think> blocks from the main answer.
+ * Handles multiple think blocks and partial (unclosed) thinking during streaming.
+ */
+function separateThinking(text: string): { thinking: string | null; answer: string } {
+  // Match complete <think>...</think> and <thinking>...</thinking> blocks
+  const thinkRegex = /<think(?:ing)?>([\s\S]*?)<\/think(?:ing)?>/gi
+  const thinkParts: string[] = []
+  let answer = text
+
+  let match: RegExpExecArray | null
+  while ((match = thinkRegex.exec(text)) !== null) {
+    thinkParts.push(match[1].trim())
+  }
+  answer = answer.replace(/<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/gi, "").trim()
+
+  // Handle unclosed <think> or <thinking> tag (streaming in progress)
+  const unclosedMatch = answer.match(/<think(?:ing)?>([\s\S]*)$/i)
+  if (unclosedMatch) {
+    thinkParts.push(unclosedMatch[1].trim())
+    answer = answer.replace(/<think(?:ing)?>[\s\S]*$/i, "").trim()
+  }
+
+  const thinking = thinkParts.length > 0 ? thinkParts.join("\n\n") : null
+  return { thinking, answer }
+}
+
+/** Streaming thinking: show every stage so the user can inspect progress. */
 function StreamingThinkingBlock({ content }: { content: string }) {
   const lines = content.split("\n").filter((l) => l.trim())
-  const visibleLines = lines.slice(-5)
 
   return (
     <div className="rounded-md border border-dashed border-amber-500/30 bg-amber-50/50 dark:bg-amber-950/20 px-2.5 py-2">
-      <div className="mb-1.5 flex items-center gap-1.5">
+      <div className="flex items-center gap-1.5 mb-1.5">
         <span className="text-sm animate-pulse">💭</span>
-        <span className="text-xs font-medium text-amber-700 dark:text-amber-400">Thinking...</span>
-        <span className="text-[10px] text-amber-600/50 dark:text-amber-500/40">{lines.length} lines</span>
+        <span className="text-xs font-medium text-amber-700 dark:text-amber-400">思考中...</span>
+        <span className="text-[10px] text-amber-600/50 dark:text-amber-500/40">{lines.length} 行</span>
       </div>
-      <div className="h-[5lh] overflow-hidden font-mono text-xs leading-relaxed text-amber-800/70 dark:text-amber-300/60">
-        {visibleLines.map((line, i) => (
+      <div className="max-h-72 overflow-y-auto pr-1 text-xs text-amber-800/70 dark:text-amber-300/60 font-mono leading-relaxed whitespace-pre-wrap break-words">
+        {lines.map((line, i) => (
           <div
-            key={lines.length - 5 + i}
-            className="truncate"
-            style={{ opacity: 0.4 + (i / visibleLines.length) * 0.6 }}
+            key={`${i}-${line}`}
           >
             {line}
           </div>
         ))}
         <span className="animate-pulse text-amber-500">▊</span>
+      </div>
+    </div>
+  )
+}
+
+/** Completed thinking: keep it fully visible; the outer chat scroll owns scrolling. */
+function ThinkingBlock({ content }: { content: string }) {
+  const lines = content.split("\n").filter((l) => l.trim())
+
+  return (
+    <div className="mb-2 rounded-md border border-dashed border-amber-500/30 bg-amber-50/50 dark:bg-amber-950/20">
+      <div className="flex w-full items-center gap-1.5 px-2.5 py-1.5 text-xs text-amber-700 dark:text-amber-400">
+        <span className="text-sm">💭</span>
+        <span className="font-medium">思考过程</span>
+        <span className="text-[10px] text-amber-600/60 dark:text-amber-500/60">{lines.length} 行</span>
+      </div>
+      <div className="max-h-72 overflow-y-auto border-t border-amber-500/20 px-2.5 py-2 pr-1 text-xs text-amber-800/80 dark:text-amber-300/70 whitespace-pre-wrap break-words font-mono leading-relaxed">
+        {content}
       </div>
     </div>
   )

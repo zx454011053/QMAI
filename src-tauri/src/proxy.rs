@@ -61,6 +61,15 @@ pub fn read_proxy_config_from_store(store_path: &Path) -> Option<ProxyConfig> {
     serde_json::from_value(proxy.clone()).ok()
 }
 
+/// Read and apply the stored proxy config. Missing or unreadable
+/// config is treated exactly like a disabled proxy, so inherited
+/// HTTP_PROXY / HTTPS_PROXY / NO_PROXY values from the parent process
+/// cannot silently affect users who never enabled proxy in the app.
+pub fn apply_proxy_env_from_store(store_path: &Path) -> String {
+    let config = read_proxy_config_from_store(store_path).unwrap_or_default();
+    apply_proxy_env(&config)
+}
+
 /// Apply a proxy config by setting the env vars reqwest reads.
 /// Returns a short human-readable summary for logging.
 ///
@@ -103,14 +112,15 @@ pub fn apply_proxy_env(config: &ProxyConfig) -> String {
         };
     }
 
-    std::env::set_var("HTTP_PROXY", url);
-    std::env::set_var("HTTPS_PROXY", url);
+    set_proxy_var("HTTP_PROXY", url);
+    set_proxy_var("HTTPS_PROXY", url);
+    set_proxy_var("ALL_PROXY", url);
     if config.bypass_local {
-        std::env::set_var("NO_PROXY", DEFAULT_BYPASS_LIST);
+        set_proxy_var("NO_PROXY", DEFAULT_BYPASS_LIST);
     } else {
         // Bypass off — clear NO_PROXY so a previously-set value
         // doesn't leak through.
-        std::env::remove_var("NO_PROXY");
+        remove_proxy_var("NO_PROXY");
     }
     format!(
         "enabled ({}, bypass_local={})",
@@ -153,9 +163,20 @@ fn redact_url(url: &str) -> String {
 /// (without it, the previous HTTP_PROXY / HTTPS_PROXY / NO_PROXY
 /// stay set in the process env and reqwest keeps using them).
 fn clear_proxy_env() {
-    std::env::remove_var("HTTP_PROXY");
-    std::env::remove_var("HTTPS_PROXY");
-    std::env::remove_var("NO_PROXY");
+    remove_proxy_var("HTTP_PROXY");
+    remove_proxy_var("HTTPS_PROXY");
+    remove_proxy_var("ALL_PROXY");
+    remove_proxy_var("NO_PROXY");
+}
+
+fn set_proxy_var(name: &str, value: &str) {
+    std::env::set_var(name, value);
+    std::env::set_var(name.to_ascii_lowercase(), value);
+}
+
+fn remove_proxy_var(name: &str) {
+    std::env::remove_var(name);
+    std::env::remove_var(name.to_ascii_lowercase());
 }
 
 #[cfg(test)]
@@ -179,28 +200,28 @@ mod tests {
         // mutex poisoned, but we have no shared state inside it
         // so resuming with the inner () is safe.
         let _guard = ENV_MUTEX.lock().unwrap_or_else(|p| p.into_inner());
-        let snap = (
-            std::env::var("HTTP_PROXY").ok(),
-            std::env::var("HTTPS_PROXY").ok(),
-            std::env::var("NO_PROXY").ok(),
-        );
-        std::env::remove_var("HTTP_PROXY");
-        std::env::remove_var("HTTPS_PROXY");
-        std::env::remove_var("NO_PROXY");
+        let names = [
+            "HTTP_PROXY",
+            "HTTPS_PROXY",
+            "ALL_PROXY",
+            "NO_PROXY",
+            "http_proxy",
+            "https_proxy",
+            "all_proxy",
+            "no_proxy",
+        ];
+        let snap = names.map(|name| std::env::var(name).ok());
+        for name in names {
+            std::env::remove_var(name);
+        }
 
         f();
 
-        match snap.0 {
-            Some(v) => std::env::set_var("HTTP_PROXY", v),
-            None => std::env::remove_var("HTTP_PROXY"),
-        }
-        match snap.1 {
-            Some(v) => std::env::set_var("HTTPS_PROXY", v),
-            None => std::env::remove_var("HTTPS_PROXY"),
-        }
-        match snap.2 {
-            Some(v) => std::env::set_var("NO_PROXY", v),
-            None => std::env::remove_var("NO_PROXY"),
+        for (name, value) in names.into_iter().zip(snap) {
+            match value {
+                Some(v) => std::env::set_var(name, v),
+                None => std::env::remove_var(name),
+            }
         }
     }
 
@@ -215,6 +236,10 @@ mod tests {
             assert!(s.contains("disabled"));
             assert!(std::env::var("HTTP_PROXY").is_err());
             assert!(std::env::var("HTTPS_PROXY").is_err());
+            assert!(std::env::var("ALL_PROXY").is_err());
+            assert!(std::env::var("http_proxy").is_err());
+            assert!(std::env::var("https_proxy").is_err());
+            assert!(std::env::var("all_proxy").is_err());
         });
     }
 
@@ -234,10 +259,28 @@ mod tests {
                 std::env::var("HTTPS_PROXY").unwrap(),
                 "http://127.0.0.1:7890"
             );
+            assert_eq!(
+                std::env::var("ALL_PROXY").unwrap(),
+                "http://127.0.0.1:7890"
+            );
+            assert_eq!(
+                std::env::var("http_proxy").unwrap(),
+                "http://127.0.0.1:7890"
+            );
+            assert_eq!(
+                std::env::var("https_proxy").unwrap(),
+                "http://127.0.0.1:7890"
+            );
+            assert_eq!(
+                std::env::var("all_proxy").unwrap(),
+                "http://127.0.0.1:7890"
+            );
             let no_proxy = std::env::var("NO_PROXY").unwrap();
+            let lowercase_no_proxy = std::env::var("no_proxy").unwrap();
             assert!(no_proxy.contains("localhost"));
             assert!(no_proxy.contains("127.0.0.0/8"));
             assert!(no_proxy.contains("192.168.0.0/16"));
+            assert_eq!(lowercase_no_proxy, no_proxy);
         });
     }
 
@@ -305,7 +348,12 @@ mod tests {
             });
             assert!(std::env::var("HTTP_PROXY").is_err());
             assert!(std::env::var("HTTPS_PROXY").is_err());
+            assert!(std::env::var("ALL_PROXY").is_err());
             assert!(std::env::var("NO_PROXY").is_err());
+            assert!(std::env::var("http_proxy").is_err());
+            assert!(std::env::var("https_proxy").is_err());
+            assert!(std::env::var("all_proxy").is_err());
+            assert!(std::env::var("no_proxy").is_err());
         });
     }
 
@@ -420,6 +468,34 @@ mod tests {
         let dir = tempdir_for_test();
         let path = dir.join("missing.json");
         assert!(read_proxy_config_from_store(&path).is_none());
+    }
+
+    #[test]
+    fn missing_store_config_clears_inherited_proxy_env() {
+        isolated(|| {
+            let dir = tempdir_for_test();
+            let path = dir.join("missing.json");
+            std::env::set_var("HTTP_PROXY", "http://inherited:8080");
+            std::env::set_var("HTTPS_PROXY", "http://inherited:8080");
+            std::env::set_var("ALL_PROXY", "http://inherited:8080");
+            std::env::set_var("NO_PROXY", "localhost");
+            std::env::set_var("http_proxy", "http://inherited:8080");
+            std::env::set_var("https_proxy", "http://inherited:8080");
+            std::env::set_var("all_proxy", "http://inherited:8080");
+            std::env::set_var("no_proxy", "localhost");
+
+            let summary = apply_proxy_env_from_store(&path);
+
+            assert!(summary.contains("disabled"));
+            assert!(std::env::var("HTTP_PROXY").is_err());
+            assert!(std::env::var("HTTPS_PROXY").is_err());
+            assert!(std::env::var("ALL_PROXY").is_err());
+            assert!(std::env::var("NO_PROXY").is_err());
+            assert!(std::env::var("http_proxy").is_err());
+            assert!(std::env::var("https_proxy").is_err());
+            assert!(std::env::var("all_proxy").is_err());
+            assert!(std::env::var("no_proxy").is_err());
+        });
     }
 
     #[test]

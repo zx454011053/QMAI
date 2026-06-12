@@ -1,7 +1,9 @@
 import type { LlmConfig } from "@/stores/wiki-store"
+import { isAzureOpenAiEndpoint } from "@/lib/azure-openai"
 import { getProviderConfig, type RequestOverrides } from "./llm-providers"
 import { getHttpFetch, isFetchNetworkError } from "./tauri-fetch"
 import { countReasoningCharsInLine, extractReasoningTextFromLine } from "./reasoning-detector"
+import { resolveRuntimeLocalCliConfig } from "./local-cli-config"
 import {
   makeLlmUsageScopeKey,
   makeProjectHistoryScopeKey,
@@ -117,12 +119,30 @@ async function streamViaCodexCli(
 }
 
 const DECODER = new TextDecoder()
+const NETWORK_RETRY_DELAYS_MS = [30_000, 60_000, 90_000, 120_000]
+export const DEFAULT_LLM_REQUEST_TIMEOUT_MS = 30 * 60 * 1000
+
+export function shouldRetryWithBrowserFetch(errorDetail: string): boolean {
+  return /client not allowed/i.test(errorDetail) && /tauri-plugin-http/i.test(errorDetail)
+}
 
 function parseLines(chunk: Uint8Array, buffer: string): [string[], string] {
   const text = buffer + DECODER.decode(chunk, { stream: true })
   const lines = text.split("\n")
   const remaining = lines.pop() ?? ""
   return [lines, remaining]
+}
+
+function waitForRetry(ms: number, signal?: AbortSignal): Promise<boolean> {
+  if (signal?.aborted) return Promise.resolve(false)
+  return new Promise((resolve) => {
+    const timeoutId = setTimeout(() => resolve(true), ms)
+    const onAbort = () => {
+      clearTimeout(timeoutId)
+      resolve(false)
+    }
+    signal?.addEventListener("abort", onAbort, { once: true })
+  })
 }
 
 export async function streamChat(
@@ -146,19 +166,25 @@ export async function streamChat(
     : requestOverrides
   const activeCallbacks = wrapStreamChatCallbacks(config, messages, callbacks, usageTracking)
   const { onToken, onDone, onError, onUsage } = activeCallbacks
+  const runtimeConfig = await resolveRuntimeLocalCliConfig(config)
+  const { onToken, onDone, onError } = callbacks
 
   // Claude Code CLI uses a subprocess transport (stdin/stdout), not
   // HTTP. Dispatch before getProviderConfig — that function throws for
   // this provider because it has no URL/headers.
+  if (runtimeConfig.provider === "claude-code") {
+    return streamViaClaudeCodeCli(runtimeConfig, messages, callbacks, signal, requestOverrides)
   if (config.provider === "claude-code") {
     return streamViaClaudeCodeCli(config, messages, activeCallbacks, signal, mergedOverrides)
   }
 
+  if (runtimeConfig.provider === "codex-cli") {
+    return streamViaCodexCli(runtimeConfig, messages, callbacks, signal, requestOverrides)
   if (config.provider === "codex-cli") {
     return streamViaCodexCli(config, messages, activeCallbacks, signal, mergedOverrides)
   }
 
-  const providerConfig = getProviderConfig(config)
+  const providerConfig = getProviderConfig(runtimeConfig)
 
   // Combined abort: (a) user cancel, (b) our long-horizon timeout.
   // The long timeout is a backstop for truly stuck requests; it's NOT
@@ -166,7 +192,7 @@ export async function streamChat(
   // almost always a fast network failure (DNS, TLS, 404, refused) that
   // WebKit surfaces as a generic "Load failed". We track whether the
   // backstop actually fired so we can tell the two apart in the error.
-  const timeoutMs = 30 * 60 * 1000 // 30 min — generous backstop for huge-context reasoning models
+  const timeoutMs = DEFAULT_LLM_REQUEST_TIMEOUT_MS // 30 min — generous backstop for huge-context reasoning models
   let combinedSignal = signal
   let timeoutController: AbortController | undefined
   let timeoutFired = false
@@ -187,18 +213,41 @@ export async function streamChat(
     combinedSignal = timeoutController.signal
   }
 
+  const body = providerConfig.buildBody(messages, requestOverrides)
+  const requestInit: RequestInit = {
+    method: "POST",
+    headers: providerConfig.headers,
+    body: JSON.stringify(body),
+    signal: combinedSignal,
+  }
+
   let response: Response
   try {
-    const body = providerConfig.buildBody(messages, mergedOverrides)
     const httpFetch = await getHttpFetch()
-    response = await httpFetch(providerConfig.url, {
-      method: "POST",
-      headers: providerConfig.headers,
-      body: JSON.stringify(body),
-      signal: combinedSignal,
-    })
+    let attempt = 0
+    while (true) {
+      try {
+        response = await httpFetch(providerConfig.url, requestInit)
+        break
+      } catch (err) {
+        if (signal?.aborted || combinedSignal?.aborted) throw err
+        if (!isFetchNetworkError(err)) throw err
+        if (timeoutFired) throw err
+        const retryDelay = NETWORK_RETRY_DELAYS_MS[attempt]
+        if (retryDelay === undefined) {
+          throw new Error(
+            `无法连接到模型接口：软件已自动等待并重试约 5 分钟，但仍然连接失败。` +
+            `常见原因是网络不稳定、代理不可用、接口地址无法访问、服务商网关暂时中断，或本机网络环境阻断了访问。` +
+            `请检查网络、代理和接口地址后再重试。接口地址：${providerConfig.url}`,
+          )
+        }
+        attempt += 1
+        const shouldContinue = await waitForRetry(retryDelay, combinedSignal)
+        if (!shouldContinue) throw err
+      }
+    }
   } catch (err) {
-    if (signal?.aborted) {
+    if (signal?.aborted || (combinedSignal?.aborted && !timeoutFired)) {
       onDone()
       return
     }
@@ -221,7 +270,7 @@ export async function streamChat(
       // wrong endpoint, CORS preflight rejection, etc. All webviews
       // collapse this class of failure into an opaque error — point
       // users at the likely cause (endpoint / key / connectivity).
-      onError(new Error(`Network error reaching ${providerConfig.url}. Check endpoint URL, API key, and connectivity.`))
+      onError(new Error(`网络连接中断，请检查网络、代理或接口地址后重试。接口地址：${providerConfig.url}`))
       return
     }
     onError(err instanceof Error ? err : new Error(String(err)))
@@ -236,8 +285,41 @@ export async function streamChat(
     } catch {
       // ignore body read failure
     }
-    onError(new Error(errorDetail))
-    return
+    if (
+      response.status === 404 &&
+      (runtimeConfig.provider === "azure" ||
+        (runtimeConfig.provider === "custom" && isAzureOpenAiEndpoint(runtimeConfig.customEndpoint)))
+    ) {
+      onError(
+        new Error(
+          `${errorDetail}。Azure OpenAI 返回 404 通常表示部署名称不正确。请确认模型栏填写的是 Azure deployment name，而不是模型 SKU；接口地址填写 https://<resource>.openai.azure.com 或包含 /openai/deployments/<deployment-name> 的地址。`,
+        ),
+      )
+      return
+    }
+    if (shouldRetryWithBrowserFetch(errorDetail) && typeof globalThis.fetch === "function") {
+      try {
+        response = await globalThis.fetch(providerConfig.url, requestInit)
+      } catch (err) {
+        onError(err instanceof Error ? err : new Error(String(err)))
+        return
+      }
+
+      if (!response.ok) {
+        let retryErrorDetail = `HTTP ${response.status}: ${response.statusText}`
+        try {
+          const retryBody = await response.text()
+          if (retryBody) retryErrorDetail += ` — ${retryBody}`
+        } catch {
+          // ignore body read failure
+        }
+        onError(new Error(retryErrorDetail))
+        return
+      }
+    } else {
+      onError(new Error(errorDetail))
+      return
+    }
   }
 
   if (!response.body) {

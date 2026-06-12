@@ -51,6 +51,14 @@ fn set_proxy_env(config: proxy::ProxyConfig) -> String {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            use tauri::Manager;
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.unminimize();
+                let _ = window.show();
+                let _ = window.set_focus();
+            }
+        }))
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_store::Builder::default().build())
@@ -77,12 +85,8 @@ pub fn run() {
             if let Ok(dir) = app.path().app_data_dir() {
                 let store_path = dir.join("app-state.json");
                 eprintln!("[proxy] reading from {}", store_path.display());
-                if let Some(cfg) = proxy::read_proxy_config_from_store(&store_path) {
-                    let summary = proxy::apply_proxy_env(&cfg);
-                    eprintln!("[proxy] {summary}");
-                } else {
-                    eprintln!("[proxy] no proxyConfig in store, requests go direct");
-                }
+                let summary = proxy::apply_proxy_env_from_store(&store_path);
+                eprintln!("[proxy] {summary}");
                 let clip_cfg = clip_server::read_clip_server_config_from_store(&store_path)
                     .unwrap_or_default();
                 if let Err(err) = clip_server::apply_clip_server_config(clip_cfg) {

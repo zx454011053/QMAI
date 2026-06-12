@@ -93,6 +93,7 @@ pub async fn read_file(path: String) -> Result<String, String> {
             match ext.as_str() {
                 "pdf" => extract_pdf_text(&path),
                 e if OFFICE_EXTS.contains(&e) => extract_office_text(&path, e),
+                "doc" => extract_legacy_doc_text(&path),
                 e if IMAGE_EXTS.contains(&e) => {
                     let size = fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
                     Ok(format!("[Image: {} ({:.1} KB)]", p.file_name().unwrap_or_default().to_string_lossy(), size as f64 / 1024.0))
@@ -105,6 +106,7 @@ pub async fn read_file(path: String) -> Result<String, String> {
                     Ok(format!("[Document: {} — text extraction not supported for .{} format]",
                         p.file_name().unwrap_or_default().to_string_lossy(), e))
                 }
+                e if is_plain_text_ext(e) => read_plain_text_file(&path),
                 _ => {
                     match fs::read_to_string(&path) {
                         Ok(content) => Ok(content),
@@ -145,6 +147,7 @@ pub async fn preprocess_file(path: String) -> Result<String, String> {
             let text = match ext.as_str() {
                 "pdf" => extract_pdf_text(&path)?,
                 e if OFFICE_EXTS.contains(&e) => extract_office_text(&path, e)?,
+                e if is_plain_text_ext(e) => read_plain_text_file(&path)?,
                 _ => return Ok("no preprocessing needed".to_string()),
             };
 
@@ -154,6 +157,31 @@ pub async fn preprocess_file(path: String) -> Result<String, String> {
     })
     .await
     .map_err(|e| format!("preprocess_file blocking task join error: {e}"))?
+}
+
+fn is_plain_text_ext(ext: &str) -> bool {
+    matches!(ext, "txt" | "md" | "mdx")
+}
+
+fn read_plain_text_file(path: &str) -> Result<String, String> {
+    let bytes = fs::read(path)
+        .map_err(|e| format!("Failed to read text file '{}': {}", path, e))?;
+    Ok(decode_plain_text_bytes(&bytes))
+}
+
+fn decode_plain_text_bytes(bytes: &[u8]) -> String {
+    if let Some(stripped) = bytes.strip_prefix(&[0xEF, 0xBB, 0xBF]) {
+        if let Ok(text) = String::from_utf8(stripped.to_vec()) {
+            return text;
+        }
+    }
+
+    if let Ok(text) = String::from_utf8(bytes.to_vec()) {
+        return text;
+    }
+
+    let (gbk_text, _, _) = encoding_rs::GBK.decode(bytes);
+    gbk_text.into_owned()
 }
 
 fn cache_path_for(original: &Path) -> std::path::PathBuf {
@@ -447,6 +475,127 @@ fn extract_office_text(path: &str, ext: &str) -> Result<String, String> {
         "odt" | "odp" => extract_odf_text(&mut archive),
         _ => Ok("[Unsupported format]".to_string()),
     }
+}
+
+fn extract_legacy_doc_text(path: &str) -> Result<String, String> {
+    let bytes = read_legacy_doc_payload(path)?;
+    extract_legacy_doc_text_from_bytes(&bytes)
+        .map_err(|e| format!("旧版 .doc 文本提取失败 '{}': {}", path, e))
+}
+
+fn read_legacy_doc_payload(path: &str) -> Result<Vec<u8>, String> {
+    let mut payload = Vec::new();
+
+    if let Ok(mut compound) = cfb::open(path) {
+        for stream_name in ["WordDocument", "0Table", "1Table"] {
+            if let Ok(mut stream) = compound.open_stream(stream_name) {
+                let mut bytes = Vec::new();
+                stream
+                    .read_to_end(&mut bytes)
+                    .map_err(|e| format!("Failed to read .doc stream '{}': {}", stream_name, e))?;
+                payload.extend_from_slice(&bytes);
+                payload.push(b'\n');
+            }
+        }
+        if !payload.is_empty() {
+            return Ok(payload);
+        }
+    }
+
+    fs::read(path).map_err(|e| format!("Failed to read legacy .doc '{}': {}", path, e))
+}
+
+fn extract_legacy_doc_text_from_bytes(bytes: &[u8]) -> Result<String, String> {
+    if bytes.is_empty() {
+        return Err("文件内容为空".to_string());
+    }
+
+    let utf16_le_units: Vec<u16> = bytes
+        .chunks_exact(2)
+        .map(|chunk| u16::from_le_bytes([chunk[0], chunk[1]]))
+        .collect();
+    let utf16_be_units: Vec<u16> = bytes
+        .chunks_exact(2)
+        .map(|chunk| u16::from_be_bytes([chunk[0], chunk[1]]))
+        .collect();
+    let (gbk_text, _, _) = encoding_rs::GBK.decode(bytes);
+    let utf8_text = String::from_utf8_lossy(bytes);
+
+    let candidates = [
+        String::from_utf16_lossy(&utf16_le_units),
+        String::from_utf16_lossy(&utf16_be_units),
+        gbk_text.into_owned(),
+        utf8_text.into_owned(),
+    ];
+
+    let mut best = String::new();
+    let mut best_score = 0usize;
+
+    for candidate in candidates {
+        let cleaned = clean_legacy_doc_text(&candidate);
+        let score = legacy_doc_text_score(&cleaned);
+        if score > best_score {
+            best_score = score;
+            best = cleaned;
+        }
+    }
+
+    if best_score == 0 || best.trim().is_empty() {
+        return Err("无法从旧版 .doc 中提取可读文本".to_string());
+    }
+
+    Ok(best)
+}
+
+fn clean_legacy_doc_text(input: &str) -> String {
+    let mut normalized = String::with_capacity(input.len());
+    for ch in input.chars() {
+        if ch == '\r' {
+            normalized.push('\n');
+        } else if ch == '\n' || ch == '\t' {
+            normalized.push(ch);
+        } else if ch.is_control() || ch == '\0' {
+            normalized.push(' ');
+        } else {
+            normalized.push(ch);
+        }
+    }
+
+    let lines: Vec<String> = normalized
+        .lines()
+        .map(|line| line.split_whitespace().collect::<Vec<_>>().join(" "))
+        .map(|line| line.trim().to_string())
+        .filter(|line| !line.is_empty())
+        .collect();
+
+    lines.join("\n")
+}
+
+fn legacy_doc_text_score(input: &str) -> usize {
+    let total = input.chars().count();
+    if total == 0 {
+        return 0;
+    }
+
+    let readable = input
+        .chars()
+        .filter(|ch| {
+            matches!(ch, '\n' | '\t')
+                || ch.is_ascii_alphanumeric()
+                || ('\u{4e00}'..='\u{9fff}').contains(ch)
+                || "，。！？；：、“”‘’（）《》【】—…,.!?;:-_()[] ".contains(*ch)
+        })
+        .count();
+    let replacement_penalty = input.chars().filter(|ch| *ch == '\u{fffd}').count() * 100;
+    let keyword_bonus = ["第", "章", "主角", "正文", "目录", "卷"]
+        .iter()
+        .filter(|keyword| input.contains(**keyword))
+        .count() * 50;
+    let ratio_score = (readable * 1000) / total;
+    ratio_score
+        .saturating_add(readable * 4)
+        .saturating_add(keyword_bonus)
+        .saturating_sub(replacement_penalty)
 }
 
 /// Extract DOCX using docx-rs library for proper structural parsing.
@@ -1527,6 +1676,40 @@ mod tests {
         path.to_string_lossy().to_string()
     }
 
+    fn tmp_text_with_bytes(ext: &str, bytes: &[u8]) -> String {
+        let dir = std::env::temp_dir();
+        let path = dir.join(format!(
+            "qmai-text-{}.{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos(),
+            ext
+        ));
+        let mut f = fs::File::create(&path).unwrap();
+        f.write_all(bytes).unwrap();
+        path.to_string_lossy().to_string()
+    }
+
+    #[test]
+    fn decode_plain_text_bytes_supports_gbk_chinese_novel_text() {
+        let (bytes, _, _) = encoding_rs::GBK.encode("第1章 税银案\n许七安醒来。");
+        let decoded = decode_plain_text_bytes(bytes.as_ref());
+
+        assert!(decoded.contains("第1章 税银案"));
+        assert!(decoded.contains("许七安醒来"));
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn preprocess_file_returns_text_content_for_txt_books() {
+        let path = tmp_text_with_bytes("txt", "第1章 税银案\n正文".as_bytes());
+        let result = preprocess_file(path.clone()).await.unwrap();
+        let _ = fs::remove_file(&path);
+
+        assert!(result.contains("第1章 税银案"));
+        assert_ne!(result, "no preprocessing needed");
+    }
+
     /// Verify read_file does NOT crash the test process on malformed PDFs.
     /// We try a handful of payloads that have historically caused
     /// pdf-extract/lopdf panics — any process abort would fail the test
@@ -2008,6 +2191,20 @@ mod tests {
 
         let _ = std::fs::remove_dir_all(&src);
         let _ = std::fs::remove_dir_all(&dest);
+    }
+
+    #[test]
+    fn legacy_doc_best_effort_extracts_utf16_text() {
+        let mut bytes = Vec::new();
+        for unit in "第一章 危机降临\n主角立刻行动".encode_utf16() {
+            bytes.extend_from_slice(&unit.to_le_bytes());
+        }
+
+        let extracted = extract_legacy_doc_text_from_bytes(&bytes)
+            .expect("legacy doc text should be extracted");
+
+        assert!(extracted.contains("第一章 危机降临"), "{extracted}");
+        assert!(extracted.contains("主角立刻行动"), "{extracted}");
     }
 }
 

@@ -2,9 +2,11 @@ import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statS
 import { spawnSync } from "node:child_process"
 import { dirname, extname, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
+import { buildCurrentReleaseNotes } from "./release-notes.mjs"
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..")
 const pkg = JSON.parse(readFileSync(resolve(root, "package.json"), "utf8"))
+const releaseNotes = await buildCurrentReleaseNotes(root)
 const bundleDir = resolve(root, "src-tauri/target/release/bundle/nsis")
 const outDir = resolve(root, "release-github")
 const portableExe = resolve(root, "release-portable/QMaiWrite.exe")
@@ -26,7 +28,7 @@ if (!updaterAssetName) {
 }
 
 const updaterAssetPath = resolve(bundleDir, updaterAssetName)
-const releaseAssetName = `QMaiWrite_${pkg.version}_x64-setup${extname(updaterAssetName)}`
+const releaseAssetName = `QMaiWrite_${pkg.version}_windows_X64${extname(updaterAssetName)}`
 const releaseAssetPath = resolve(outDir, releaseAssetName)
 const releaseSignaturePath = `${releaseAssetPath}.sig`
 
@@ -69,7 +71,9 @@ const latest = {
   },
 }
 
+latest.notes = releaseNotes
 writeFileSync(resolve(outDir, "latest.json"), JSON.stringify(latest, null, 2), "utf8")
+writeFileSync(resolve(outDir, "release-notes.txt"), releaseNotes, "utf8")
 
 console.log(`GitHub Release 产物已生成：${outDir}`)
 console.log(`更新包：${releaseAssetName}`)

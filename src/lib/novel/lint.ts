@@ -1,4 +1,4 @@
-import { streamChat, type StreamCallbacks } from "@/lib/llm-client"
+import { DEFAULT_LLM_REQUEST_TIMEOUT_MS, streamChat, type StreamCallbacks } from "@/lib/llm-client"
 import i18n from "@/i18n"
 import type { ChatMessage } from "@/lib/llm-providers"
 import { useWikiStore } from "@/stores/wiki-store"
@@ -95,7 +95,7 @@ ${langReminder}`
       },
     }
 
-    await streamChat(llmConfig, messages, callbacks, AbortSignal.timeout(120000))
+    await streamChat(llmConfig, messages, callbacks, AbortSignal.timeout(DEFAULT_LLM_REQUEST_TIMEOUT_MS))
 
     const jsonMatch = result.match(/\[[\s\S]*\]/)
     if (!jsonMatch) return []

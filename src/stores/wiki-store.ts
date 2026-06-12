@@ -3,6 +3,7 @@ import type { WikiProject, FileNode } from "@/types/wiki"
 import { DEFAULT_SOURCE_WATCH_CONFIG } from "@/lib/source-watch-config"
 import type { LintResult } from "@/lib/lint"
 import type { NovelReviewResult } from "@/lib/novel/review-adapter"
+import type { DimensionReviewResult, SixReviewDimensionKey } from "@/lib/novel/dimension-review-adapter"
 import type { TrashItem } from "@/lib/trash"
 
 const GRAPH_LABEL_MODE_KEY = "lk-graph-label-display-mode"
@@ -10,6 +11,27 @@ const GRAPH_EDGE_COLOR_KEY = "lk-graph-edge-color"
 const GRAPH_EDGE_STRENGTH_KEY = "lk-graph-edge-strength"
 const GRAPH_EDGE_STYLE_KEY = "lk-graph-edge-style"
 const GRAPH_EDGE_LABELS_ALWAYS_KEY = "lk-graph-edge-labels-always"
+const CHAT_DOCK_POSITION_KEY = "qmai-chat-dock-position"
+
+export type ChatDockPosition = "bottom" | "right"
+export type SettingsCategoryId =
+  | "llm"
+  | "rerank"
+  | "embedding"
+  | "network"
+  | "interface"
+  | "novel"
+  | "usage-guide"
+  | "maintenance"
+  | "feedback"
+  | "contact-support"
+  | "changelog"
+
+const readStoredChatDockPosition = (): ChatDockPosition => {
+  if (typeof localStorage === "undefined") return "bottom"
+  const saved = localStorage.getItem(CHAT_DOCK_POSITION_KEY)
+  return saved === "right" || saved === "bottom" ? saved : "bottom"
+}
 
 const readStoredGraphLabelDisplayMode = (): string => {
   if (typeof localStorage === "undefined") return "all"
@@ -46,7 +68,8 @@ const readStoredGraphEdgeLabelsAlways = (): boolean => {
  * etc.), so this field is ignored for them. `undefined` defaults to
  * `chat_completions` for backward compatibility with pre-0.3.7 configs.
  */
-export type CustomApiMode = "chat_completions" | "anthropic_messages"
+export type CustomApiMode = "chat_completions" | "responses" | "anthropic_messages"
+export type AzureModelFamily = "auto" | "gpt5"
 export type ReasoningMode = "auto" | "off" | "low" | "medium" | "high" | "max" | "custom"
 
 export interface ReasoningConfig {
@@ -55,14 +78,18 @@ export interface ReasoningConfig {
 }
 
 interface LlmConfig {
-  provider: "openai" | "anthropic" | "google" | "ollama" | "custom" | "minimax" | "claude-code" | "codex-cli"
+  provider: "openai" | "anthropic" | "google" | "azure" | "ollama" | "custom" | "minimax" | "claude-code" | "codex-cli"
   apiKey: string
   model: string
   ollamaUrl: string
   customEndpoint: string
+  azureApiVersion?: string
+  azureModelFamily?: AzureModelFamily
   maxContextSize: number // max context window in characters
   apiMode?: CustomApiMode
   reasoning?: ReasoningConfig
+  localCliIsolation?: boolean
+  codexCliTimeoutMinutes?: number
 }
 
 export type SearchProvider = "tavily" | "serpapi" | "searxng" | "none"
@@ -262,6 +289,8 @@ interface MultimodalConfig {
   model: string
   ollamaUrl: string
   customEndpoint: string
+  azureApiVersion?: string
+  azureModelFamily?: AzureModelFamily
   apiMode?: CustomApiMode
   /** Max parallel caption requests during ingest. >=1. */
   concurrency: number
@@ -306,9 +335,13 @@ export interface ProviderOverride {
   apiKey?: string
   model?: string
   baseUrl?: string           // customEndpoint for custom presets, ollamaUrl for ollama
+  azureApiVersion?: string
+  azureModelFamily?: AzureModelFamily
   apiMode?: CustomApiMode
   maxContextSize?: number
   reasoning?: ReasoningConfig
+  localCliIsolation?: boolean
+  codexCliTimeoutMinutes?: number
 }
 
 export type ProviderConfigs = Record<string, ProviderOverride>
@@ -328,6 +361,7 @@ export type FinalChapterSavePhase =
   | "saving"
   | "reviewing"
   | "saved"
+  | "reingesting"
   | "ingested"
   | "blocked_by_review"
   | "ingest_failed"
@@ -352,6 +386,11 @@ export interface LintRunState extends AsyncTaskState {
 
 export interface ReviewRunState extends AsyncTaskState {
   results: NovelReviewResult[]
+  thinking?: string
+  dimensionResults?: Partial<Record<SixReviewDimensionKey, DimensionReviewResult>>
+  dimensionThinking?: Partial<Record<SixReviewDimensionKey, string>>
+  activeDimension?: SixReviewDimensionKey
+  dimensionProgress?: string
 }
 
 export interface PendingEditorHighlight {
@@ -388,13 +427,16 @@ interface WikiState {
   selectedMemoryCenterEntry: string | null
   selectedGenerationHistoryId: string | null
   chatExpanded: boolean
+  chatDockPosition: ChatDockPosition
   searchPanelOpen: boolean
-  activeView: "wiki" | "sources" | "promptConfig" | "generationHistory" | "search" | "graph" | "lint" | "soul" | "settings" | "trash" | "reviewCenter"
-  activeSettingsCategory: "usage-guide" | null
+  activeView: "wiki" | "sources" | "promptConfig" | "generationHistory" | "search" | "graph" | "lint" | "soul" | "dismantling" | "settings" | "trash" | "reviewCenter"
+  activeSettingsCategory: SettingsCategoryId | null
   selectedSoulId: string | null
   selectedSoulTab: "project" | "character"
   selectedSoulSection: "builtIn" | "custom"
   selectedReviewDimension: string | null
+  selectedReviewFilePath: string
+  selectedDismantlingProjectId: string | null
   graphMode: string
   graphDisplayMode: string
   graphColorMode: string
@@ -408,6 +450,7 @@ interface WikiState {
   graphStats: { nodeCount: number; edgeCount: number; hiddenCount: number; filteredNodeCount: number; filteredEdgeCount: number }
   refreshGraph: (() => void) | null
   llmConfig: LlmConfig
+  aiChatModel: string
   /** Per-provider-preset stored overrides (API key, model, endpoint, …). */
   providerConfigs: ProviderConfigs
   /** Which preset is currently active. `null` = no LLM configured. */
@@ -422,6 +465,7 @@ interface WikiState {
   scheduledImportConfig: ScheduledImportConfig
   sourceWatchConfig: SourceWatchConfig
   novelMode: boolean
+  chatEditModeEnabled: boolean
   novelConfig: NovelConfig
   searchHistory: string[]
   searchTrigger: { query: string; ts: number } | null
@@ -442,13 +486,16 @@ interface WikiState {
   setSelectedMemoryCenterEntry: (entry: string | null) => void
   setSelectedGenerationHistoryId: (id: string | null) => void
   setChatExpanded: (expanded: boolean) => void
+  setChatDockPosition: (position: ChatDockPosition) => void
   setSearchPanelOpen: (open: boolean) => void
   setActiveView: (view: WikiState["activeView"]) => void
-  setActiveSettingsCategory: (category: "usage-guide" | null) => void
+  setActiveSettingsCategory: (category: SettingsCategoryId | null) => void
   setSelectedSoulId: (id: string | null) => void
   setSelectedSoulTab: (tab: "project" | "character") => void
   setSelectedSoulSection: (section: "builtIn" | "custom") => void
   setSelectedReviewDimension: (dimension: string | null) => void
+  setSelectedReviewFilePath: (path: string) => void
+  setSelectedDismantlingProjectId: (id: string | null) => void
   setGraphMode: (mode: string) => void
   setGraphDisplayMode: (mode: string) => void
   setGraphColorMode: (mode: string) => void
@@ -462,6 +509,7 @@ interface WikiState {
   setGraphStats: (stats: WikiState["graphStats"]) => void
   setRefreshGraph: (refreshGraph: (() => void) | null) => void
   setLlmConfig: (config: LlmConfig) => void
+  setAiChatModel: (model: string) => void
   setProviderConfigs: (configs: ProviderConfigs) => void
   setActivePresetId: (id: string | null) => void
   setSearchApiConfig: (config: SearchApiConfig) => void
@@ -474,6 +522,7 @@ interface WikiState {
   setScheduledImportConfig: (config: ScheduledImportConfig) => void
   setSourceWatchConfig: (sourceWatchConfig: SourceWatchConfig) => void
   setNovelMode: (novelMode: boolean) => void
+  setChatEditModeEnabled: (enabled: boolean) => void
   setNovelConfig: (config: Partial<NovelConfig>) => void
   setSearchHistory: (history: string[]) => void
   setSearchTrigger: (trigger: { query: string; ts: number } | null) => void
@@ -499,6 +548,7 @@ export const useWikiStore = create<WikiState>((set) => ({
   selectedMemoryCenterEntry: null,
   selectedGenerationHistoryId: null,
   chatExpanded: false,
+  chatDockPosition: readStoredChatDockPosition(),
   searchPanelOpen: false,
   activeView: "wiki",
   activeSettingsCategory: null,
@@ -506,6 +556,8 @@ export const useWikiStore = create<WikiState>((set) => ({
   selectedSoulTab: "project",
   selectedSoulSection: "builtIn",
   selectedReviewDimension: null,
+  selectedReviewFilePath: "",
+  selectedDismantlingProjectId: null,
   graphMode: "overview",
   graphDisplayMode: "graph",
   graphColorMode: "type",
@@ -525,8 +577,12 @@ export const useWikiStore = create<WikiState>((set) => ({
     model: "",
     ollamaUrl: "http://localhost:11434",
     customEndpoint: "",
+    azureApiVersion: "2024-10-21",
+    azureModelFamily: "auto",
     reasoning: { mode: "auto" },
+    localCliIsolation: false,
   },
+  aiChatModel: "",
   providerConfigs: {},
   activePresetId: null,
 
@@ -542,13 +598,21 @@ export const useWikiStore = create<WikiState>((set) => ({
   setSelectedMemoryCenterEntry: (selectedMemoryCenterEntry) => set({ selectedMemoryCenterEntry }),
   setSelectedGenerationHistoryId: (selectedGenerationHistoryId) => set({ selectedGenerationHistoryId }),
   setChatExpanded: (chatExpanded) => set({ chatExpanded }),
+  setChatDockPosition: (chatDockPosition) => {
+    if (typeof localStorage !== "undefined") {
+      localStorage.setItem(CHAT_DOCK_POSITION_KEY, chatDockPosition)
+    }
+    set({ chatDockPosition })
+  },
   setSearchPanelOpen: (searchPanelOpen) => set({ searchPanelOpen }),
-  setActiveView: (activeView) => set({ activeView }),
+  setActiveView: (activeView) => set({ activeView: activeView === "dismantling" ? "wiki" : activeView }),
   setActiveSettingsCategory: (activeSettingsCategory) => set({ activeSettingsCategory }),
   setSelectedSoulId: (selectedSoulId) => set({ selectedSoulId }),
   setSelectedSoulTab: (selectedSoulTab) => set({ selectedSoulTab }),
   setSelectedSoulSection: (selectedSoulSection) => set({ selectedSoulSection }),
   setSelectedReviewDimension: (selectedReviewDimension) => set({ selectedReviewDimension }),
+  setSelectedReviewFilePath: (selectedReviewFilePath) => set({ selectedReviewFilePath }),
+  setSelectedDismantlingProjectId: (selectedDismantlingProjectId) => set({ selectedDismantlingProjectId }),
   setGraphMode: (graphMode) => set({ graphMode }),
   setGraphDisplayMode: (graphDisplayMode) => set({ graphDisplayMode }),
   setGraphColorMode: (graphColorMode) => set({ graphColorMode }),
@@ -592,6 +656,8 @@ export const useWikiStore = create<WikiState>((set) => ({
     model: "",
     ollamaUrl: "http://localhost:11434",
     customEndpoint: "",
+    azureApiVersion: "2024-10-21",
+    azureModelFamily: "auto",
     apiMode: "chat_completions",
     concurrency: 4,
   },
@@ -619,6 +685,7 @@ export const useWikiStore = create<WikiState>((set) => ({
   sourceWatchConfig: DEFAULT_SOURCE_WATCH_CONFIG,
 
   novelMode: false,
+  chatEditModeEnabled: false,
   novelConfig: { ...DEFAULT_NOVEL_CONFIG },
   searchHistory: [],
   searchTrigger: null,
@@ -634,6 +701,7 @@ export const useWikiStore = create<WikiState>((set) => ({
   theme: "light",
 
   setLlmConfig: (llmConfig) => set({ llmConfig }),
+  setAiChatModel: (aiChatModel) => set({ aiChatModel }),
   setProviderConfigs: (providerConfigs) => set({ providerConfigs }),
   setActivePresetId: (activePresetId) => set({ activePresetId }),
   setSearchApiConfig: (searchApiConfig) => set({ searchApiConfig }),
@@ -646,6 +714,7 @@ export const useWikiStore = create<WikiState>((set) => ({
   setScheduledImportConfig: (scheduledImportConfig) => set({ scheduledImportConfig }),
   setSourceWatchConfig: (sourceWatchConfig) => set({ sourceWatchConfig }),
   setNovelMode: (novelMode) => set({ novelMode }),
+  setChatEditModeEnabled: (chatEditModeEnabled) => set({ chatEditModeEnabled }),
   setNovelConfig: (config) => set((state) => ({ novelConfig: { ...state.novelConfig, ...config } })),
   setSearchHistory: (searchHistory) => set({ searchHistory }),
   setSearchTrigger: (searchTrigger) => set({ searchTrigger }),

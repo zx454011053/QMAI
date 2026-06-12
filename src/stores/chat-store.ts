@@ -55,6 +55,7 @@ interface ChatState {
   setMessages: (messages: DisplayMessage[]) => void
   setConversations: (conversations: Conversation[]) => void
   setStreaming: (streaming: boolean) => void
+  setStreamingContent: (content: string) => void
   appendStreamToken: (token: string) => void
   finalizeStream: (content: string, references?: MessageReference[], usage?: UsageInfo) => void
   setMode: (mode: ChatState["mode"]) => void
@@ -102,6 +103,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
     set((state) => ({
       conversations: [newConversation, ...state.conversations],
       activeConversationId: id,
+      streamingContent: "",
+      isStreaming: false,
     }))
     return id
   },
@@ -120,7 +123,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       }
     }),
 
-  setActiveConversation: (id) => set({ activeConversationId: id }),
+  setActiveConversation: (id) => set({ activeConversationId: id, streamingContent: "", isStreaming: false }),
 
   renameConversation: (id, title) =>
     set((state) => ({
@@ -177,6 +180,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
   setConversations: (conversations) => set({ conversations }),
 
   setStreaming: (isStreaming) => set({ isStreaming }),
+
+  setStreamingContent: (streamingContent) => set({ streamingContent }),
 
   appendStreamToken: (token) =>
     set((state) => ({

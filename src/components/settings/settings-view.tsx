@@ -2,14 +2,15 @@ import { useCallback, useEffect, useMemo, useState } from "react"
 import {
   Bot,
   BookOpen,
+  Database,
+  ListFilter,
   Palette,
   Network,
   History,
   Wrench,
-  Clock,
-  FolderSync,
   HelpCircle,
   MessageCircle,
+  HeartHandshake,
 } from "lucide-react"
 import { useTranslation } from "react-i18next"
 import i18n from "@/i18n"
@@ -26,23 +27,23 @@ import { RerankSection } from "./sections/rerank-section"
 import { InterfaceSection } from "./sections/interface-section"
 import { NovelSection } from "./sections/novel-section"
 import { NetworkSection } from "./sections/network-section"
-import { ScheduledImportSection } from "./sections/scheduled-import-section"
-import { SourceWatchSection } from "./sections/source-watch-section"
 import { ChangelogSection } from "./sections/changelog-section"
 import { MaintenanceSection } from "./sections/maintenance-section"
 import { FeedbackSection } from "./sections/feedback-section"
 import { UsageGuideSection } from "./sections/usage-guide-section"
+import { ContactSupportSection } from "./sections/contact-support-section"
 
 type CategoryId =
   | "llm"
+  | "rerank"
+  | "embedding"
   | "network"
-  | "source-watch"
-  | "scheduled-import"
   | "interface"
   | "novel"
   | "usage-guide"
   | "maintenance"
   | "feedback"
+  | "contact-support"
   | "changelog"
 
 interface Category {
@@ -56,14 +57,15 @@ interface Category {
 
 const CATEGORIES: Category[] = [
   { id: "llm", labelKey: "settings.categories.llm", icon: Bot },
+  { id: "rerank", labelKey: "settings.categories.rerank", icon: ListFilter },
+  { id: "embedding", labelKey: "settings.categories.embedding", icon: Database },
   { id: "network", labelKey: "settings.categories.network", icon: Network },
-  { id: "source-watch", labelKey: "settings.categories.sourceWatch", icon: FolderSync },
-  { id: "scheduled-import", labelKey: "settings.categories.scheduledImport", icon: Clock },
   { id: "interface", labelKey: "settings.categories.interface", icon: Palette },
   { id: "novel", labelKey: "settings.categories.novel", icon: BookOpen },
   { id: "usage-guide", labelKey: "settings.categories.usageGuide", icon: HelpCircle },
   { id: "maintenance", labelKey: "settings.categories.maintenance", icon: Wrench },
   { id: "feedback", labelKey: "settings.categories.feedback", icon: MessageCircle },
+  { id: "contact-support", labelKey: "settings.categories.contactSupport", icon: HeartHandshake },
   { id: "changelog", labelKey: "settings.categories.changelog", icon: History },
 ]
 
@@ -100,9 +102,12 @@ function initialDraft(
     model: llm.model,
     ollamaUrl: llm.ollamaUrl,
     customEndpoint: llm.customEndpoint,
+    azureApiVersion: llm.azureApiVersion ?? "2024-10-21",
+    azureModelFamily: llm.azureModelFamily ?? "auto",
     maxContextSize: llm.maxContextSize ?? 204800,
     apiMode: llm.apiMode,
     reasoning: llm.reasoning,
+    localCliIsolation: llm.localCliIsolation === true,
     embeddingEnabled: embed.enabled,
     embeddingEndpoint: embed.endpoint,
     embeddingApiKey: embed.apiKey,
@@ -118,6 +123,8 @@ function initialDraft(
     multimodalModel: multimodal.model,
     multimodalOllamaUrl: multimodal.ollamaUrl,
     multimodalCustomEndpoint: multimodal.customEndpoint,
+    multimodalAzureApiVersion: multimodal.azureApiVersion ?? "2024-10-21",
+    multimodalAzureModelFamily: multimodal.azureModelFamily ?? "auto",
     multimodalApiMode: multimodal.apiMode,
     multimodalConcurrency: multimodal.concurrency,
     outputLanguage,
@@ -305,9 +312,12 @@ export function SettingsView() {
       model: draft.model,
       ollamaUrl: draft.ollamaUrl,
       customEndpoint: draft.customEndpoint,
+      azureApiVersion: draft.provider === "azure" ? draft.azureApiVersion.trim() : undefined,
+      azureModelFamily: draft.provider === "azure" ? draft.azureModelFamily : undefined,
       maxContextSize: draft.maxContextSize,
       apiMode: draft.provider === "custom" ? draft.apiMode : undefined,
       reasoning: draft.reasoning,
+      localCliIsolation: draft.localCliIsolation,
     }
     const newEmbed = {
       enabled: draft.embeddingEnabled,
@@ -331,6 +341,8 @@ export function SettingsView() {
       model: draft.multimodalModel,
       ollamaUrl: draft.multimodalOllamaUrl,
       customEndpoint: draft.multimodalCustomEndpoint,
+      azureApiVersion: draft.multimodalProvider === "azure" ? draft.multimodalAzureApiVersion.trim() : undefined,
+      azureModelFamily: draft.multimodalProvider === "azure" ? draft.multimodalAzureModelFamily : undefined,
       apiMode: draft.multimodalProvider === "custom" ? draft.multimodalApiMode : undefined,
       // Clamp at save time so a hand-edited persisted store with a
       // ridiculous concurrency value (e.g. someone setting 1000 in
@@ -445,19 +457,13 @@ export function SettingsView() {
   const body = useMemo(() => {
     switch (active) {
       case "llm":
-        return (
-          <div className="space-y-8">
-            <LlmProviderSection />
-            <EmbeddingSection draft={draft} setDraft={setDraft} />
-            <RerankSection draft={draft} setDraft={setDraft} />
-          </div>
-        )
+        return <LlmProviderSection />
+      case "rerank":
+        return <RerankSection draft={draft} setDraft={setDraft} />
+      case "embedding":
+        return <EmbeddingSection draft={draft} setDraft={setDraft} />
       case "network":
         return <NetworkSection draft={draft} setDraft={setDraft} />
-      case "source-watch":
-        return <SourceWatchSection draft={draft} setDraft={setDraft} projectReady={!!project} />
-      case "scheduled-import":
-        return <ScheduledImportSection draft={draft} setDraft={setDraft} />
       case "interface":
         return <InterfaceSection draft={draft} setDraft={setDraft} />
       case "novel":
@@ -468,6 +474,8 @@ export function SettingsView() {
         return <MaintenanceSection />
       case "feedback":
         return <FeedbackSection />
+      case "contact-support":
+        return <ContactSupportSection />
       case "changelog":
         return <ChangelogSection />
     }

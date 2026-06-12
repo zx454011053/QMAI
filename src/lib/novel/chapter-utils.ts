@@ -1,4 +1,5 @@
 import { listDirectory, readFile } from "@/commands/fs"
+import type { NovelTaskIntent } from "./task-router"
 
 export function extractChapterNumber(text: string): number | null {
   const m = text.match(/第\s*(\d+)\s*[章节回]/)
@@ -19,7 +20,14 @@ export function flattenMdFiles(nodes: Array<{ name: string; path: string; is_dir
       out.push({ name: node.name, path: node.path })
     }
   }
-  return out
+  return out.sort((a, b) => {
+    const aNum = extractChapterNumber(a.name)
+    const bNum = extractChapterNumber(b.name)
+    if (aNum !== null && bNum !== null && aNum !== bNum) return aNum - bNum
+    if (aNum !== null && bNum === null) return -1
+    if (aNum === null && bNum !== null) return 1
+    return a.name.localeCompare(b.name, "zh-Hans-CN", { numeric: true })
+  })
 }
 
 export async function getNextChapterNumber(projectPath: string): Promise<number> {
@@ -58,4 +66,83 @@ export async function getNextChapterNumber(projectPath: string): Promise<number>
   }
   if (!hasChapterOne && maxNum === 0) return 1
   return maxNum + 1
+}
+
+export async function findChapterFileByNumber(projectPath: string, chapterNumber: number): Promise<string | null> {
+  try {
+    const tree = await listDirectory(`${projectPath}/wiki/chapters`)
+    const files = flattenMdFiles(tree)
+    for (const file of files) {
+      const byName = extractChapterNumber(file.name.replace(/\.md$/, ""))
+      if (byName === chapterNumber) return file.path
+      try {
+        const content = await readFile(file.path)
+        const byFrontmatter = content.match(/^chapter_number:\s*(\d+)\s*$/m)
+        if (byFrontmatter?.[1] && Number.parseInt(byFrontmatter[1], 10) === chapterNumber) {
+          return file.path
+        }
+      } catch {
+        // ignore unreadable chapter file
+      }
+    }
+  } catch {
+    // chapter dir may not exist yet
+  }
+  return null
+}
+
+export interface ResolveTargetChapterNumberForChatInput {
+  projectPath: string
+  userRequest: string
+  routeIntent?: NovelTaskIntent
+  routeChapterNumber?: number
+  selectedFile?: string | null
+}
+
+export async function resolveTargetChapterNumberForChat(input: ResolveTargetChapterNumberForChatInput): Promise<number | undefined> {
+  if (input.routeChapterNumber && input.routeChapterNumber > 0) {
+    return input.routeChapterNumber
+  }
+
+  if (!shouldResolveNextChapter(input.userRequest, input.routeIntent)) {
+    return undefined
+  }
+
+  const selectedChapterNumber = await readSelectedChapterNumber(input.selectedFile)
+  if (selectedChapterNumber && selectedChapterNumber > 0) {
+    return selectedChapterNumber + 1
+  }
+
+  return getNextChapterNumber(input.projectPath)
+}
+
+function shouldResolveNextChapter(userRequest: string, routeIntent?: NovelTaskIntent): boolean {
+  if (routeIntent !== "continue_chapter" && routeIntent !== "write_chapter") return false
+  const compact = userRequest.replace(/\s+/g, "")
+  return /下一章|下1章|下章|新的?一章/.test(compact)
+}
+
+async function readSelectedChapterNumber(selectedFile?: string | null): Promise<number | undefined> {
+  if (!selectedFile) return undefined
+  const normalized = selectedFile.replace(/\\/g, "/")
+  if (!/\/wiki\/chapters\//i.test(normalized)) return undefined
+
+  const byName = extractChapterNumber(normalized.split("/").pop()?.replace(/\.md$/i, "") ?? "")
+  if (byName) return byName
+
+  try {
+    const content = await readFile(selectedFile)
+    const byFrontmatter = content.match(/^chapter_number:\s*(\d+)\s*$/m)
+    if (byFrontmatter?.[1]) {
+      const n = Number.parseInt(byFrontmatter[1], 10)
+      if (Number.isFinite(n) && n > 0) return n
+    }
+  } catch {
+    // ignore unreadable selected chapter file
+  }
+  return undefined
+}
+
+export async function readSelectedChapterNumberForFile(selectedFile?: string | null): Promise<number | undefined> {
+  return readSelectedChapterNumber(selectedFile)
 }

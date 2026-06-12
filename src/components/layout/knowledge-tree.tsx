@@ -12,6 +12,7 @@ import { countChapterBodyWords } from "@/lib/chapter-word-count"
 import { normalizeChapterStatus, type ChapterStatus } from "@/lib/novel/chapter-meta"
 import { moveFileToTrash } from "@/lib/trash"
 import { makeChapterFileName, makeDefaultChapterTitle, makeSafeFileSlug } from "@/lib/wiki-filename"
+import { useImportProgressStore } from "@/stores/import-progress-store"
 
 interface WikiPageInfo {
   path: string
@@ -147,6 +148,14 @@ function flattenAllFiles(nodes: FileNode[]): FileNode[] {
     if (!node.is_dir) files.push(node)
   }
   return files
+}
+
+async function cleanupDeletedSourceMemory(
+  projectPath: string,
+  input: { kind: "chapter" | "outline"; pagePath: string; content?: string },
+): Promise<void> {
+  const { deleteNovelSourceMemory } = await import("@/lib/novel/delete-source-memory")
+  await deleteNovelSourceMemory(projectPath, input)
 }
 
 function parsePageInfo(path: string, fileName: string, content: string): WikiPageInfo | null {
@@ -394,19 +403,18 @@ export function KnowledgeTree({
     setDeletingPath(pagePath)
     try {
       const projectPath = normalizePath(project.path)
-      let chapterNumberToDelete: number | null = null
+      let sourceContent: string | undefined
       if (filterType === "chapter") {
         try {
-          const content = await readFile(pagePath)
-          chapterNumberToDelete = extractChapterNumberFromContent(content) ?? extractPageOrderFromTitle(pagePath.replace(/\\/g, "/").split("/").pop()?.replace(/\.md$/, "") ?? "")
+          sourceContent = await readFile(pagePath)
         } catch { /* ignore */ }
       }
       await moveFileToTrash(projectPath, pagePath, filterType)
-      if (chapterNumberToDelete && chapterNumberToDelete > 0) {
-        import("@/lib/novel/chapter-ingest")
-          .then(({ deleteChapterSnapshots }) => deleteChapterSnapshots(projectPath, chapterNumberToDelete))
-          .catch(() => {})
-      }
+      await cleanupDeletedSourceMemory(projectPath, {
+        kind: filterType,
+        pagePath,
+        content: sourceContent,
+      })
       await loadPages()
       onRemovePendingPage?.(pagePath)
       const tree = await listDirectory(projectPath)
@@ -442,6 +450,10 @@ export function KnowledgeTree({
       const projectPath = normalizePath(project.path)
       for (const outlinePath of outlineFiles) {
         await moveFileToTrash(projectPath, outlinePath, "outline")
+        await cleanupDeletedSourceMemory(projectPath, {
+          kind: "outline",
+          pagePath: outlinePath,
+        })
         onRemovePendingPage?.(outlinePath)
       }
 
@@ -1126,23 +1138,26 @@ export function KnowledgeTree({
   )
 }
 
-export function RawSourcesSection() {
-  const { t } = useTranslation()
+export function RawSourcesSection({ onCancelExtraction }: { onCancelExtraction?: () => void }) {
   const project = useWikiStore((s) => s.project)
-  const selectedFile = useWikiStore((s) => s.selectedFile)
-  const setSelectedFile = useWikiStore((s) => s.setSelectedFile)
+  const tasks = useImportProgressStore((s) => s.tasks)
   const [expanded, setExpanded] = useState(false)
-  const [sources, setSources] = useState<FileNode[]>([])
+  const currentTask = useMemo(() => {
+    if (!project) return null
+    const projectPath = normalizePath(project.path)
+    return tasks
+      .filter((task) => task.projectPath === projectPath)
+      .sort((a, b) => b.updatedAt - a.updatedAt)[0] ?? null
+  }, [project, tasks])
+  const isRunning = currentTask?.status === "running"
+  const progressPercent = currentTask && currentTask.total > 0
+    ? Math.round((currentTask.completed / currentTask.total) * 100)
+    : 0
+  const kindLabel = currentTask?.kind === "outline" ? "AI 大纲" : "章节"
 
   useEffect(() => {
-    if (!project) return
-    const projectPath = normalizePath(project.path)
-    listDirectory(`${projectPath}/raw/sources`)
-      .then((tree) => setSources(flattenAllFiles(tree)))
-      .catch(() => setSources([]))
-  }, [project])
-
-  if (sources.length === 0) return null
+    if (isRunning) setExpanded(true)
+  }, [isRunning])
 
   return (
     <div className="shrink-0 border-t bg-background/95 p-2 backdrop-blur">
@@ -1157,24 +1172,48 @@ export function RawSourcesSection() {
           <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
         )}
         <BookOpen className="h-3.5 w-3.5 shrink-0 text-amber-600" />
-        <span className="flex-1 text-left font-medium text-muted-foreground">{t("knowledgeTree.rawSources")}</span>
-        <span className="text-xs text-muted-foreground">{sources.length}</span>
+        <span className="flex-1 text-left font-medium text-muted-foreground">提取中</span>
+        {currentTask ? (
+          <span className="text-xs text-muted-foreground">
+            {currentTask.completed}/{currentTask.total}
+          </span>
+        ) : null}
       </button>
       {expanded && (
-        <div className="ml-3 max-h-56 overflow-auto pr-1">
-          {sources.map((file) => {
-            const isSelected = selectedFile === file.path
-            return (
-              <button
-                key={file.path}
-                type="button"
-                onClick={() => setSelectedFile(file.path)}
-                className={`flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-left text-sm ${isSelected ? "qm-selected" : "text-muted-foreground qm-hover"}`}
-              >
-                <span className="truncate">{file.name}</span>
-              </button>
-            )
-          })}
+        <div className="ml-3 space-y-2 pr-1 text-xs text-muted-foreground">
+          {currentTask ? (
+            <>
+              <div className="flex items-center justify-between gap-2">
+                <span className="min-w-0 truncate">
+                  {currentTask.status === "running"
+                    ? currentTask.cancelling
+                      ? `正在取消${kindLabel}记忆提取，当前内容完成后停止...`
+                      : `正在提取${kindLabel}记忆：${currentTask.completed}/${currentTask.total} ${currentTask.currentTitle}`
+                    : currentTask.message ?? "提取任务已结束"}
+                </span>
+                {currentTask.status === "running" ? (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="h-6 shrink-0 px-2 text-xs"
+                    onClick={onCancelExtraction}
+                    disabled={currentTask.cancelling}
+                  >
+                    取消
+                  </Button>
+                ) : null}
+              </div>
+              <div className="h-1.5 overflow-hidden rounded-full bg-border">
+                <div
+                  className="h-full rounded-full bg-primary transition-all"
+                  style={{ width: `${progressPercent}%` }}
+                />
+              </div>
+            </>
+          ) : (
+            <div className="rounded-md bg-muted/40 px-2 py-2">暂无提取任务</div>
+          )}
         </div>
       )}
     </div>

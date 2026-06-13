@@ -3,8 +3,7 @@ import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { useWikiStore } from "@/stores/wiki-store"
-import { readFile, writeFile } from "@/commands/fs"
-import { join } from "@tauri-apps/api/path"
+import { loadCustomDeAiSkill, saveCustomDeAiSkill } from "@/lib/novel/de-ai-adapter"
 
 const DEFAULT_DE_AI_SKILL = `# 中文小说去AI味专业规则
 
@@ -146,26 +145,25 @@ export function DeAiSkillEditor() {
 
   async function loadSkill() {
     if (!project) return
-    try {
-      const skillPath = await join(project.path, "de-ai-skill.txt")
-      const skillContent = await readFile(skillPath)
-      setContent(skillContent)
+    const custom = await loadCustomDeAiSkill(project.path)
+    if (custom) {
+      setContent(custom)
       setIsDefault(false)
-    } catch {
-      setContent(DEFAULT_DE_AI_SKILL)
-      setIsDefault(true)
+      return
     }
+    setContent(DEFAULT_DE_AI_SKILL)
+    setIsDefault(true)
   }
 
   async function handleSave() {
     if (!project) return
     setSaving(true)
     try {
-      const skillPath = await join(project.path, "de-ai-skill.txt")
-      await writeFile(skillPath, content)
+      await saveCustomDeAiSkill(project.path, content)
       setMessage("保存成功")
       setIsDefault(false)
-    } catch {
+    } catch (err) {
+      console.error("保存去AI味Skill失败:", err)
       setMessage("保存失败，请稍后重试")
     } finally {
       setSaving(false)

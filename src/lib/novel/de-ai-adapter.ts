@@ -1,6 +1,6 @@
 import type { ChatMessage } from "@/lib/llm-providers"
-import { readFile } from "@/commands/fs"
-import { join } from "@tauri-apps/api/path"
+import { readFile, writeFileAtomic } from "@/commands/fs"
+import { joinPath, normalizePath } from "@/lib/path-utils"
 import qmQuaiSkillMarkdown from "../../../QM-QUAI.md?raw"
 import { CHINESE_NOVEL_DE_AI_RULES } from "./de-ai-rules"
 
@@ -10,16 +10,25 @@ const QM_QUAI_SYSTEM_PROMPT = [
   CHINESE_NOVEL_DE_AI_RULES,
 ].join("\n")
 
+export const DE_AI_SKILL_FILENAME = "de-ai-skill.txt"
+
+export function getDeAiSkillPath(projectPath: string): string {
+  return joinPath(normalizePath(projectPath), DE_AI_SKILL_FILENAME)
+}
+
 export async function loadCustomDeAiSkill(projectPath?: string | null): Promise<string | null> {
   if (!projectPath) return null
   try {
-    const skillPath = await join(projectPath, "de-ai-skill.txt")
-    const content = await readFile(skillPath)
+    const content = await readFile(getDeAiSkillPath(projectPath))
     const trimmed = content.trim()
     return trimmed || null
   } catch {
     return null
   }
+}
+
+export async function saveCustomDeAiSkill(projectPath: string, content: string): Promise<void> {
+  await writeFileAtomic(getDeAiSkillPath(projectPath), content)
 }
 
 export function buildQmQuaiSystemPrompt(customSkill?: string): string {

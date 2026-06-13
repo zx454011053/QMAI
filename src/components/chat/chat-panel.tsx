@@ -8,6 +8,7 @@ import { ChatMessage, StreamingMessage } from "./chat-message"
 import { ChatDockControls } from "./chat-dock-controls"
 import { setLastQueryPages, useSourceFiles } from "./chat-shared"
 import { ChatInput } from "./chat-input"
+import { DeepThinkingFeatureTooltipContent } from "./deep-thinking-feature-tooltip"
 import { useChatStore, chatMessagesToLLM, type UsageInfo, type DisplayMessage } from "@/stores/chat-store"
 import { useWikiStore } from "@/stores/wiki-store"
 import { streamChat, type ChatMessage as LLMMessage } from "@/lib/llm-client"
@@ -1366,19 +1367,27 @@ export function ChatPanel() {
                     <ChatDockControls />
                     {novelMode ? (
                       <>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="sm"
-                          aria-pressed={deepChapterEnabled}
-                          className={getDeepChapterToggleButtonClass(deepChapterEnabled)}
-                          onClick={() => setDeepChapterEnabled(true)}
-                          title="深度思考"
-                          aria-label="深度思考"
-                        >
-                          <Brain className="mr-1 h-4 w-4" />
-                          深度思考
-                        </Button>
+                        <Tooltip>
+                          <TooltipTrigger
+                            render={(
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                aria-pressed={deepChapterEnabled}
+                                className={getDeepChapterToggleButtonClass(deepChapterEnabled)}
+                                onClick={() => setDeepChapterEnabled(true)}
+                                aria-label="深度思考"
+                              />
+                            )}
+                          >
+                            <Brain className="mr-1 h-4 w-4" />
+                            深度思考
+                          </TooltipTrigger>
+                          <TooltipContent side="top" align="start" className="max-w-sm p-3">
+                            <DeepThinkingFeatureTooltipContent />
+                          </TooltipContent>
+                        </Tooltip>
                         <Button
                           type="button"
                           variant="ghost"

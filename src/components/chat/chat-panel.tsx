@@ -869,10 +869,10 @@ export function ChatPanel() {
           if (detectEditIntent(text)) {
             const lastSys = systemMessages[systemMessages.length - 1]
             if (lastSys && typeof lastSys.content === "string") {
-              const { readScopeFileContents } = await import("@/lib/novel/agent-tools")
+              const { readScopeFileContents, formatScopeFilesForAgent } = await import("@/lib/novel/agent-tools")
               const filesWithContent = await readScopeFileContents(pp, "chapters")
               const fileContentStr = filesWithContent.length > 0
-                ? `\n\n## 当前章节文件内容（供修改定位）\n${filesWithContent.map(f => `### ${f.name}\n\`\`\`\n${f.content}\n\`\`\``).join("\n\n")}`
+                ? `\n\n## 当前章节文件内容（供修改定位）\n${formatScopeFilesForAgent(pp, filesWithContent)}`
                 : "\n\n## 当前章节文件列表\n(暂无章节文件)"
               lastSys.content += buildAgentSystemSuffix("chapters")
               lastSys.content += fileContentStr

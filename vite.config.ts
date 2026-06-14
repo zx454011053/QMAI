@@ -64,14 +64,15 @@ export default defineConfig(async () => ({
   },
   // 2. tauri expects a fixed port, fail if that port is not available
   server: {
-    port: 1420,
+    // Windows Hyper-V 常保留 1413-1512，1420 会触发 EACCES
+    port: 5173,
     strictPort: true,
-    host: host || false,
+    host: host || "127.0.0.1",
     hmr: host
       ? {
           protocol: "ws",
           host,
-          port: 1421,
+          port: 5174,
         }
       : undefined,
     watch: {

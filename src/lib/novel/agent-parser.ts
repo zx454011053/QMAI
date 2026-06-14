@@ -14,8 +14,12 @@
  * </replace>
  * </file_edit>
  *
+ * path 也支持 QM/chapters/、QM/outlines/ 以及项目内绝对路径。
  * 支持多个 <file_edit> 块
  */
+
+import { knowledgeScopeDescription } from "@/lib/project-storage-path"
+import { normalizeFileEditReplaceText, normalizeFileEditSearchText } from "./file-edit-match"
 
 export interface FileEditAction {
   filePath: string
@@ -45,8 +49,8 @@ export function parseAgentResponse(content: string): ParsedAgentResponse {
   while ((match = editRegex.exec(content)) !== null) {
     edits.push({
       filePath: match[1].trim(),
-      search: match[2].trim(),
-      replace: match[3].trim(),
+      search: normalizeFileEditSearchText(match[2]),
+      replace: normalizeFileEditReplaceText(match[3]),
     })
   }
 
@@ -82,7 +86,9 @@ export function detectEditIntent(text: string): boolean {
  * 告诉 LLM 如何输出文件修改指令
  */
 export function buildAgentSystemSuffix(scope: "chapters" | "outlines"): string {
-  const scopeDesc = scope === "chapters" ? "章节文件（wiki/chapters/）" : "大纲文件（wiki/outlines/）"
+  const scopeDesc = knowledgeScopeDescription(scope)
+  const chaptersDesc = knowledgeScopeDescription("chapters")
+  const outlinesDesc = knowledgeScopeDescription("outlines")
 
   return `
 
@@ -90,7 +96,7 @@ export function buildAgentSystemSuffix(scope: "chapters" | "outlines"): string {
 
 当用户要求你修改${scopeDesc}中的内容时，请使用以下格式输出修改指令：
 
-<file_edit path="文件的相对路径">
+<file_edit path="wiki/outlines/总大纲.md">
 <search>
 要被替换的原文（必须精确匹配文件中的内容，包括换行和空格）
 </search>
@@ -105,6 +111,6 @@ export function buildAgentSystemSuffix(scope: "chapters" | "outlines"): string {
 3. 如果同一个文件有多处需要修改，为每处修改分别输出一个 <file_edit> 块。
 4. 在修改指令之外，用自然语言简要说明你做了什么修改。
 5. 如果用户只是在聊天讨论（没有要求修改文件），就正常回答，不要输出 <file_edit>。
-6. 只能修改${scopeDesc}下的文件，不要尝试修改其他位置的文件。
+6. 只能修改${chaptersDesc}或${outlinesDesc}下的文件；path 必须使用上文「路径」行给出的相对路径（wiki/ 或 QM/ 前缀均可）。
 7. 尽量完整覆盖所有相关修改，不要遗漏。`
 }

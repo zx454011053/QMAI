@@ -23,6 +23,7 @@ import {
   collectWebResearch,
   shouldUseWebResearch,
 } from "@/lib/web-research"
+import { listScopeFiles } from "@/lib/novel/agent-tools"
 
 async function loadOutlineContext(projectPath: string): Promise<{ context: string; sources: string[] }> {
   const pp = normalizePath(projectPath)
@@ -30,27 +31,22 @@ async function loadOutlineContext(projectPath: string): Promise<{ context: strin
   const sources: string[] = []
 
   try {
-    const outlinesDir = `${pp}/wiki/outlines`
-    const tree = await listDirectory(outlinesDir)
-    for (const file of tree.slice(0, 10)) {
-      if (file.name.endsWith(".md")) {
-        try {
-          const content = await readFile(`${outlinesDir}/${file.name}`)
-          const trimmed = content.length > 3000 ? content.slice(0, 3000) + "\n...(已截断)" : content
-          sections.push(`【${file.name.replace(/\.md$/, "")}】\n${trimmed}`)
-          sources.push(`大纲: ${file.name.replace(/\.md$/, "")}`)
-        } catch { /* skip */ }
-      }
+    const outlineFiles = await listScopeFiles(pp, "outlines")
+    for (const file of outlineFiles.slice(0, 20)) {
+      try {
+        const content = await readFile(file.path)
+        const trimmed = content.length > 3000 ? content.slice(0, 3000) + "\n...(已截断)" : content
+        sections.push(`【${file.name.replace(/\.md$/, "")}】\n${trimmed}`)
+        sources.push(`大纲: ${file.name.replace(/\.md$/, "")}`)
+      } catch { /* skip */ }
     }
   } catch { /* no outlines dir */ }
 
   try {
-    const chaptersDir = `${pp}/wiki/chapters`
-    const tree = await listDirectory(chaptersDir)
-    const chapterFiles = tree.filter(f => f.name.endsWith(".md")).slice(-5)
-    for (const file of chapterFiles) {
+    const chapterFiles = await listScopeFiles(pp, "chapters")
+    for (const file of chapterFiles.slice(-5)) {
       try {
-        const content = await readFile(`${chaptersDir}/${file.name}`)
+        const content = await readFile(file.path)
         const preview = content.length > 1500 ? content.slice(0, 1500) + "\n...(已截断)" : content
         sections.push(`【章节:${file.name.replace(/\.md$/, "")}】\n${preview}`)
         sources.push(`章节: ${file.name.replace(/\.md$/, "")}`)
@@ -296,10 +292,10 @@ export function OutlineChatPanel({ onClose }: { onClose: () => void }) {
       const agentSuffix = hasEditIntent ? buildAgentSystemSuffix("outlines") : ""
       let fileListStr = ""
       if (hasEditIntent) {
-        const { readScopeFileContents } = await import("@/lib/novel/agent-tools")
+        const { readScopeFileContents, formatScopeFilesForAgent } = await import("@/lib/novel/agent-tools")
         const filesWithContent = await readScopeFileContents(project.path, "outlines")
         fileListStr = filesWithContent.length > 0
-          ? `\n\n## 当前大纲文件内容（供修改定位）\n${filesWithContent.map(f => `### ${f.name}\n\`\`\`\n${f.content}\n\`\`\``).join("\n\n")}`
+          ? `\n\n## 当前大纲文件内容（供修改定位）\n${formatScopeFilesForAgent(project.path, filesWithContent)}`
           : "\n\n## 当前大纲文件列表\n(暂无大纲文件)"
       }
 
